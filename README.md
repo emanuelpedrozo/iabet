@@ -92,6 +92,16 @@ A aplicação usa ¼ de Kelly e teto de stake. Antes de produção, pesos precis
 
 `app/providers/base.py` define contratos independentes para fixtures, estatísticas e odds. Um provider só deve ser criado quando existir API oficial, licença, export autorizado ou acordo comercial. SofaScore, WhoScored, Flashscore, FotMob, Transfermarkt e casas podem bloquear automação ou proibi-la em seus termos; o projeto não inclui bypass, captura de sessão ou scraping clandestino.
 
+### Fontes gratuitas configuradas
+
+- `FOOTBALL_DATA_KEY`: sincroniza os 380 jogos, resultados, horários e times do Brasileirão (`BSA`).
+- `ODDS_API_KEY`: captura odds atuais do Brasileirão e preserva casa, mercado, linha e horário.
+- `API_FUTEBOL_KEY` (ou o legado `API_FOOTBALL_KEY`): API Futebol brasileira (`api.api-futebol.com.br`), usada para estatísticas, escalações, cartões e arbitragem.
+
+No Swagger, autentique-se como administrador e use `GET /api/v1/admin/providers` para diagnóstico, `POST /api/v1/admin/sync/fixtures` para agenda, `POST /api/v1/admin/sync/odds` para preços e `POST /api/v1/admin/sync/api-futebol-index` para vincular os IDs brasileiros. Detalhes de uma partida são importados sob demanda por `POST /api/v1/admin/sync/api-futebol-match/{match_id}` para preservar a franquia. As rotinas gerais também são executadas pelo Celery Beat.
+
+O plano gratuito da API Futebol permite 100 chamadas diárias. A carga histórica automática roda às 06:15 (America/Sao_Paulo) e importa no máximo 80 partidas ainda ausentes, deixando margem para diagnóstico e atualização corrente. O processo é idempotente e continua no dia seguinte.
+
 Para criar um provider:
 
 1. Implemente `SportsDataProvider` ou `OddsProvider`.

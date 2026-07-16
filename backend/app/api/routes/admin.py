@@ -5,6 +5,10 @@ from app.api.deps import admin
 from app.core.database import get_session
 from app.models.entities import JobLog, Match, Team, User
 from app.workers.tasks import refresh_all
+from app.providers.api_futebol import ApiFutebolProvider
+from app.providers.football_data import FootballDataProvider
+from app.providers.odds_api import OddsApiProvider
+from app.services.sync import DataSyncService
 router=APIRouter(prefix="/admin",tags=["Admin"],dependencies=[Depends(admin)])
 @router.get("/overview")
 async def overview(session:AsyncSession=Depends(get_session)):
@@ -14,4 +18,19 @@ async def overview(session:AsyncSession=Depends(get_session)):
 @router.post("/refresh")
 async def refresh():
     task=refresh_all.delay(); return {"task_id":task.id,"status":"queued"}
-
+@router.get("/providers")
+async def providers():
+    async def safe(name,call):
+        try: return {"name":name,"healthy":True,**await call()}
+        except Exception as exc: return {"name":name,"healthy":False,"error":str(exc)[:200]}
+    return [await safe("football_data",FootballDataProvider().usage),await safe("odds_api",OddsApiProvider().usage),await safe("api_futebol",ApiFutebolProvider().status)]
+@router.post("/sync/fixtures")
+async def sync_fixtures(session:AsyncSession=Depends(get_session)): return await DataSyncService(session).sync_fixtures()
+@router.post("/sync/odds")
+async def sync_odds(session:AsyncSession=Depends(get_session)): return await DataSyncService(session).sync_odds()
+@router.post("/sync/api-futebol-index")
+async def sync_api_futebol_index(session:AsyncSession=Depends(get_session)): return await DataSyncService(session).sync_api_futebol_index()
+@router.post("/sync/api-futebol-match/{match_id}")
+async def sync_api_futebol_match(match_id:int,session:AsyncSession=Depends(get_session)): return await DataSyncService(session).sync_api_futebol_match(match_id)
+@router.post("/sync/api-futebol-history")
+async def sync_api_futebol_history(limit:int=80,session:AsyncSession=Depends(get_session)): return await DataSyncService(session).import_api_futebol_history(limit)

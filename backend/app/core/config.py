@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     admin_email: str = "admin@iabet.com"
     admin_password: str = "ChangeMe123!"
     odds_api_key: str | None = None
+    api_football_key: str | None = None
+    api_futebol_key: str | None = None
+    football_data_key: str | None = None
     footystats_api_key: str | None = None
     cors_origins: str = "http://localhost:3000"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
