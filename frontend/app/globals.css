@@ -1,3 +1,92 @@
-@tailwind base; @tailwind components; @tailwind utilities;
-:root{color-scheme:dark} body{margin:0;background:#080d0b;color:#eef5f1;font-family:Inter,ui-sans-serif,system-ui;background-image:radial-gradient(circle at 12% -8%,rgba(54,227,139,.1),transparent 30%)}
-*{box-sizing:border-box}.card{border:1px solid #26322d;background:linear-gradient(145deg,rgba(20,30,26,.96),rgba(12,18,15,.96));border-radius:18px}.hero-panel{background:radial-gradient(circle at 90% 10%,rgba(54,227,139,.13),transparent 34%),linear-gradient(135deg,rgba(19,31,26,.98),rgba(10,16,13,.98))}.label{font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:#8ea39a}.bar{height:7px;border-radius:99px;background:#26322d;overflow:hidden}.bar>span{display:block;height:100%;background:linear-gradient(90deg,#1fba6c,#59f1a2);border-radius:99px}button,input{font:inherit}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: #080d0b;
+  color: #eef5f1;
+  font-family: var(--font-inter), Inter, ui-sans-serif, system-ui;
+  background-image: radial-gradient(circle at 12% -8%, rgba(54, 227, 139, 0.1), transparent 30%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.card {
+  border: 1px solid #26322d;
+  background: linear-gradient(145deg, rgba(20, 30, 26, 0.96), rgba(12, 18, 15, 0.96));
+  border-radius: 18px;
+}
+
+.hero-panel {
+  background:
+    radial-gradient(circle at 90% 10%, rgba(54, 227, 139, 0.13), transparent 34%),
+    linear-gradient(135deg, rgba(19, 31, 26, 0.98), rgba(10, 16, 13, 0.98));
+}
+
+.label {
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #8ea39a;
+}
+
+.bar {
+  height: 7px;
+  border-radius: 99px;
+  background: #26322d;
+  overflow: hidden;
+}
+
+.bar > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #1fba6c, #59f1a2);
+  border-radius: 99px;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+[role='button']:focus-visible {
+  outline: 2px solid #36e38b;
+  outline-offset: 2px;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 50;
+  border-radius: 0 0 12px 0;
+  background: #36e38b;
+  padding: 0.75rem 1rem;
+  font-weight: 700;
+  color: #080d0b;
+}
+
+.skip-link:focus {
+  left: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
