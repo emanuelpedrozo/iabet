@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import statistics
 
+from app.services.stat_markets import STAT_LINES, prob_key
+
 MIN_EV = 0.03
 MIN_KELLY = 0.005
 MIN_EDGE = 0.02
 SOFT_ODD_PREMIUM = 1.08  # odd > 8% acima da mediana → value fofo
 MOVE_DROP_THRESHOLD = -0.03  # queda de 3%+ na odd
 SAMPLE_GAMES_SOFT = 5
+STAT_MARKETS = frozenset({"corners", "cards", "shots"})
 
 MARKET_KEYS = {
     ("match_result", "home"): "home",
@@ -79,6 +82,12 @@ def allowed_totals_line(line: float | None) -> bool:
     return any(abs(line - x) < 1e-6 for x in (1.5, 2.5, 3.5))
 
 
+def allowed_stat_line(market: str, line: float | None) -> bool:
+    if market not in STAT_MARKETS or line is None:
+        return False
+    return any(abs(line - x) < 1e-6 for x in STAT_LINES[market])
+
+
 def confidence_score(
     pred: dict,
     market: str,
@@ -102,6 +111,10 @@ def confidence_score(
     if key and key in ("home", "draw", "away") and key in poisson and key in elo:
         gap = abs(float(poisson[key]) - float(elo[key]))
         agreement = max(0.0, 1.0 - gap / 0.2)
+    elif market in STAT_MARKETS:
+        # Sem cruzamento ELO; amostra de TeamStat define o teto de confiança.
+        sample = ((pred.get("stat_samples") or {}).get(market)) or 0
+        agreement = 0.45 + 0.05 * min(sample, 6)
     else:
         agreement = 0.65
     edge_score = min(1.0, max(0.0, edge) / 0.10)
@@ -113,7 +126,9 @@ def confidence_score(
             conf *= 0.85
 
     if has_team_stats and (
-        market == "goals_2_5" or selection in ("over", "under", "yes", "no")
+        market in STAT_MARKETS
+        or market == "goals_2_5"
+        or selection in ("over", "under", "yes", "no")
     ):
         conf = min(1.0, conf + 0.05)
 
@@ -202,5 +217,12 @@ def market_probability(
     if market == "goals_2_5" or market == "totals":
         key = totals_prob_key(selection, line)
         return pred.get(key) if key else None
+    if market in STAT_MARKETS:
+        sel = selection.lower()
+        if sel not in ("over", "under") or line is None:
+            return None
+        if not allowed_stat_line(market, line):
+            return None
+        return pred.get(prob_key(market, sel, line))
     key = MARKET_KEYS.get((market, selection))
     return pred.get(key) if key else None

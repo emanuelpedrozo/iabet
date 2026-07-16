@@ -32,8 +32,9 @@ def build_pdf(data: dict) -> bytes:
         Paragraph("Resumo do modelo", styles["Heading2"]),
         Paragraph(
             f'Favorito: <b>{m["favorite"]}</b>. Placar modal {p["score"]}; '
-            f'xG {p["xg_home"]:.2f}-{p["xg_away"]:.2f}. Ensemble 1.3: forma recente, '
-            f"splits casa/fora, Dixon-Coles + ELO. Value com de-vig, consenso e movimento de odds.",
+            f'xG {p["xg_home"]:.2f}-{p["xg_away"]:.2f}. Ensemble 1.4: forma recente, '
+            f"splits casa/fora, Dixon-Coles + ELO; escanteios/cartoes/chutes via TeamStat. "
+            f"Value com de-vig, consenso e movimento de odds.",
             styles["BodyText"],
         ),
     ]

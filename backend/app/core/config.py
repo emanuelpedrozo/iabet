@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     admin_password: str = DEFAULT_ADMIN_PASSWORD
     odds_api_key: str | None = None
     api_football_key: str | None = None
+    api_sports_key: str | None = None
+    api_sports_host: str = "https://v3.football.api-sports.io"
     api_futebol_key: str | None = None
     football_data_key: str | None = None
     footystats_api_key: str | None = None

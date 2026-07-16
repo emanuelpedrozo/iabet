@@ -31,7 +31,7 @@ async def main():
    for home,away,kickoff,venue,prices in FIXTURES:
     h,a=dbteams[home],dbteams[away]; inp=ModelInput(h.attack_strength,h.defense_strength,a.attack_strength,a.defense_strength,h.elo,a.elo); pred=ensemble(inp)
     m=Match(competition_id=comp.id,home_team_id=h.id,away_team_id=a.id,kickoff=datetime.fromisoformat(kickoff),venue=venue,metadata_={"h2h":[],"players":{"home":[],"away":[]}}); s.add(m); await s.flush()
-    s.add(Prediction(match_id=m.id,model_version="ensemble-1.3",probabilities=pred,expected_home_goals=pred["xg_home"],expected_away_goals=pred["xg_away"],score_mode=pred["score"],features={"seed":True}))
+    s.add(Prediction(match_id=m.id,model_version="ensemble-1.4",probabilities=pred,expected_home_goals=pred["xg_home"],expected_away_goals=pred["xg_away"],score_mode=pred["score"],features={"seed":True}))
     for selection,price in prices.items(): s.add(Odd(match_id=m.id,bookmaker="Mercado agregado",market="match_result",selection=selection,price=price,captured_at=now))
   await s.commit()
 if __name__=="__main__": asyncio.run(main())

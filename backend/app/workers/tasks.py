@@ -68,3 +68,15 @@ def refresh_predictions():
             return await DataSyncService(s).refresh_predictions()
 
     return asyncio.run(_run_logged("refresh_predictions", work))
+
+
+@celery_app.task(name="app.workers.tasks.import_api_sports_history")
+def import_api_sports_history():
+    async def work():
+        async with SessionLocal() as s:
+            service = DataSyncService(s)
+            serie_a = await service.import_api_sports_history(2024, 38, "A")
+            serie_b = await service.import_api_sports_history(2024, 38, "B")
+            return {"serie_a": serie_a, "serie_b": serie_b}
+
+    return asyncio.run(_run_logged("import_api_sports_history", work))

@@ -5,4 +5,4 @@ class TeamOut(BaseModel):
 class MatchListOut(BaseModel):
     id:int; kickoff:datetime; venue:str|None; status:str; competition:str; home_team:TeamOut; away_team:TeamOut; favorite:str|None=None; best_value:dict|None=None; probabilities:dict|None=None
 class AnalysisOut(BaseModel):
-    match: MatchListOut; prediction:dict; odds:list[dict]; value_bets:list[dict]; comparison:dict; h2h:list[dict]; players:dict; generated_at:datetime
+    match: MatchListOut; prediction:dict; odds:list[dict]; value_bets:list[dict]; comparison:dict; h2h:list[dict]; players:dict; historical_stats:dict; generated_at:datetime

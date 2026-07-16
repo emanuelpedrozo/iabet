@@ -3,11 +3,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import admin
 from app.core.database import get_session
-from app.models.entities import JobLog, Match, Team, User
+from app.models.entities import JobLog, Match, PlayerMatchStat, Team, User
 from app.workers.tasks import refresh_all
 from app.providers.api_futebol import ApiFutebolProvider
 from app.providers.football_data import FootballDataProvider
 from app.providers.odds_api import OddsApiProvider
+from app.providers.api_sports import ApiSportsProvider
 from app.services.sync import DataSyncService
 
 router = APIRouter(prefix="/admin", tags=["Admin"], dependencies=[Depends(admin)])
@@ -32,6 +33,7 @@ async def overview(session: AsyncSession = Depends(get_session)):
         "users": await count(User),
         "teams": await count(Team),
         "matches": await count(Match),
+        "player_match_stats": await count(PlayerMatchStat),
         "logs": [
             {"job": x.job, "status": x.status, "detail": x.detail, "created_at": x.created_at}
             for x in logs
@@ -57,6 +59,7 @@ async def providers():
         await safe("football_data", FootballDataProvider().usage),
         await safe("odds_api", OddsApiProvider().usage),
         await safe("api_futebol", ApiFutebolProvider().status),
+        await safe("api_sports", ApiSportsProvider().status),
     ]
 
 
@@ -105,4 +108,24 @@ async def sync_predictions(session: AsyncSession = Depends(get_session)):
     try:
         return await DataSyncService(session).refresh_predictions()
     except ValueError as exc:
+        raise _map_sync_error(exc) from exc
+
+
+@router.get("/sync/api-sports-progress")
+async def api_sports_progress(
+    season: int = 2024, division: str = "A", session: AsyncSession = Depends(get_session)
+):
+    return await DataSyncService(session).api_sports_progress(season, division)
+
+
+@router.post("/sync/api-sports-history")
+async def sync_api_sports_history(
+    season: int = 2024,
+    limit: int = 10,
+    division: str = "A",
+    session: AsyncSession = Depends(get_session),
+):
+    try:
+        return await DataSyncService(session).import_api_sports_history(season, limit, division)
+    except (ValueError, RuntimeError) as exc:
         raise _map_sync_error(exc) from exc

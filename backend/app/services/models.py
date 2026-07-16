@@ -119,7 +119,7 @@ def monte_carlo(x: ModelInput, n: int = 30000, seed: int = 42) -> dict:
 
 
 def ensemble(x: ModelInput) -> dict:
-    """Ensemble 1.3: Poisson+Dixon–Coles + ELO; totals 1.5/2.5/3.5."""
+    """Ensemble 1.4: Poisson+Dixon–Coles + ELO; totals de gols; base para stats."""
     p = poisson_model(x)
     e = elo_model(x)
     result = {k: round(0.70 * p[k] + 0.30 * e[k], 4) for k in ("home", "draw", "away")}
@@ -143,7 +143,7 @@ def ensemble(x: ModelInput) -> dict:
             "xg_away": round(p["xg_away"], 2),
             "score": p["score"],
             "models": {"poisson": p, "elo": e},
-            "version": "ensemble-1.3",
+            "version": "ensemble-1.4",
         }
     )
     return result

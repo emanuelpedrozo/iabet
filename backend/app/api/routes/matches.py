@@ -4,18 +4,28 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_session
-from app.models.entities import Match, MatchStatus, TeamStat
+from app.models.entities import Match, MatchStatus, Player, PlayerMatchStat, TeamStat
 from app.repositories.matches import MatchRepository
 from app.schemas.matches import AnalysisOut, MatchListOut
 from app.services.models import ModelInput, ensemble
 from app.services.value import (
+    allowed_stat_line,
     allowed_totals_line,
     evaluate,
     market_probability,
     median_odd,
     multiplicative_devig,
     odds_move_pct,
+    STAT_MARKETS,
 )
+from app.services.stat_rates import (
+    RECENT_GAMES,
+    attach_stat_markets_to_prediction,
+    match_stat_lambdas,
+    recent_team_stats,
+)
+from app.services.team_metrics import number as _number
+from app.services.team_metrics import team_metric
 
 router = APIRouter(prefix="/matches", tags=["Partidas"])
 
@@ -37,6 +47,23 @@ def prediction_for(m) -> dict | None:
     return None
 
 
+async def prediction_with_stats(session: AsyncSession, m) -> dict | None:
+    """Predição materializada; completa com mercados de stats dos últimos 10 jogos."""
+    pred = prediction_for(m)
+    if not pred:
+        return None
+    if pred.get("stat_rates"):
+        return pred
+    rates = await match_stat_lambdas(
+        session,
+        m.home_team_id,
+        m.away_team_id,
+        competition_id=m.competition_id,
+        as_of=m.kickoff,
+    )
+    return attach_stat_markets_to_prediction(pred, rates)
+
+
 def values_for(
     m,
     pred: dict,
@@ -51,6 +78,8 @@ def values_for(
     history: dict[tuple, list] = {}
     for o in sorted(m.odds, key=lambda x: x.captured_at):
         if o.market == "goals_2_5" and not allowed_totals_line(o.line):
+            continue
+        if o.market in STAT_MARKETS and not allowed_stat_line(o.market, o.line):
             continue
         key = (o.bookmaker, o.market, o.selection, o.line)
         history.setdefault(key, []).append(o)
@@ -177,6 +206,119 @@ def h2h_over25_rate(h2h: list[dict]) -> float | None:
     return overs / len(h2h)
 
 
+def _team_metric(stat: TeamStat, match: Match, key: str, team_id: int):
+    """Unifica os formatos da API-Sports e da API Futebol."""
+    is_home = match.home_team_id == team_id
+    return team_metric(stat.metrics, match.metadata_, key, is_home=is_home)
+
+
+async def historical_detail(
+    session: AsyncSession,
+    team_id: int,
+    limit: int = RECENT_GAMES,
+    as_of: datetime | None = None,
+    venue: str = "all",
+    competition_id: int | None = None,
+) -> dict:
+    """Médias e elenco só com os últimos N jogos (sem temporada antiga)."""
+    reference_date = as_of or datetime.now(timezone.utc)
+    team_rows = await recent_team_stats(
+        session,
+        team_id,
+        venue=venue,
+        limit=limit,
+        as_of=reference_date,
+        competition_id=competition_id,
+    )
+    keys = ["total_shots", "shots_on_goal", "corner_kicks", "fouls", "yellow_cards", "expected_goals"]
+    averages = {}
+    for key in keys:
+        values = [_team_metric(stat, match, key, team_id) for stat, match in team_rows]
+        clean = [value for value in values if value is not None]
+        averages[key] = round(sum(clean) / len(clean), 2) if clean else None
+
+    # Elenco: só quem jogou nesses mesmos últimos N jogos.
+    recent_match_ids = [match.id for _, match in team_rows]
+    players: list[dict] = []
+    if recent_match_ids:
+        player_rows = (
+            await session.execute(
+                select(PlayerMatchStat, Player, Match)
+                .join(Player, Player.id == PlayerMatchStat.player_id)
+                .join(Match, Match.id == PlayerMatchStat.match_id)
+                .where(
+                    PlayerMatchStat.team_id == team_id,
+                    PlayerMatchStat.match_id.in_(recent_match_ids),
+                )
+                .order_by(Match.kickoff.desc())
+            )
+        ).all()
+        grouped: dict[int, dict] = {}
+        for stat, player, _ in player_rows:
+            entry = grouped.setdefault(
+                player.id,
+                {
+                    "name": player.name,
+                    "position": player.position,
+                    "photo": (player.stats or {}).get("photo"),
+                    "rows": [],
+                },
+            )
+            if len(entry["rows"]) < limit:
+                entry["rows"].append(stat)
+        for entry in grouped.values():
+            rows = entry.pop("rows")
+            minutes = sum(row.minutes or 0 for row in rows)
+            if minutes <= 0:
+                continue
+            totals = {
+                "shots": 0.0,
+                "shots_on_target": 0.0,
+                "tackles": 0.0,
+                "interceptions": 0.0,
+                "fouls": 0.0,
+                "yellow_cards": 0.0,
+            }
+            for row in rows:
+                metrics = row.metrics or {}
+                totals["shots"] += _number((metrics.get("shots") or {}).get("total")) or 0
+                totals["shots_on_target"] += _number((metrics.get("shots") or {}).get("on")) or 0
+                totals["tackles"] += _number((metrics.get("tackles") or {}).get("total")) or 0
+                totals["interceptions"] += (
+                    _number((metrics.get("tackles") or {}).get("interceptions")) or 0
+                )
+                totals["fouls"] += _number((metrics.get("fouls") or {}).get("committed")) or 0
+                totals["yellow_cards"] += _number((metrics.get("cards") or {}).get("yellow")) or 0
+            players.append(
+                {
+                    **entry,
+                    "appearances": len(rows),
+                    "minutes": minutes,
+                    **{
+                        f"{key}_per90": round(value * 90 / minutes, 2)
+                        for key, value in totals.items()
+                    },
+                }
+            )
+        players.sort(
+            key=lambda item: (item["shots_per90"] + item["tackles_per90"], item["minutes"]),
+            reverse=True,
+        )
+
+    dates = [match.kickoff.date().isoformat() for _, match in team_rows]
+    return {
+        "sample": len(team_rows),
+        "sample_max": limit,
+        "averages": averages,
+        "players": players[:12],
+        "players_scope": f"last_{limit}_games",
+        "lineup_sample": len(recent_match_ids),
+        "venue": venue,
+        "period_start": min(dates) if dates else None,
+        "period_end": max(dates) if dates else None,
+    }
+
+
 @router.get("", response_model=list[MatchListOut])
 async def list_matches(
     date: datetime | None = None,
@@ -193,7 +335,7 @@ async def match_analysis(match_id: int, session: AsyncSession = Depends(get_sess
     m = await MatchRepository(session).get(match_id)
     if not m:
         raise HTTPException(404, "Partida não encontrada")
-    p = prediction_for(m)
+    p = await prediction_with_stats(session, m)
     if not p:
         raise HTTPException(503, "Predição ainda não materializada para esta partida")
 
@@ -246,6 +388,22 @@ async def match_analysis(match_id: int, session: AsyncSession = Depends(get_sess
         }
         for o in sorted(m.odds, key=lambda x: x.captured_at, reverse=True)
     ]
+    historical_stats = {"limit": RECENT_GAMES, "home": {}, "away": {}}
+    for venue in ("all", "home", "away"):
+        historical_stats["home"][venue] = await historical_detail(
+            session,
+            m.home_team_id,
+            as_of=m.kickoff,
+            venue=venue,
+            competition_id=m.competition_id,
+        )
+        historical_stats["away"][venue] = await historical_detail(
+            session,
+            m.away_team_id,
+            as_of=m.kickoff,
+            venue=venue,
+            competition_id=m.competition_id,
+        )
     return {
         "match": serialize(m, **value_kwargs),
         "prediction": p,
@@ -264,5 +422,6 @@ async def match_analysis(match_id: int, session: AsyncSession = Depends(get_sess
         },
         "h2h": h2h,
         "players": m.metadata_.get("players", {}),
+        "historical_stats": historical_stats,
         "generated_at": datetime.now(timezone.utc),
     }

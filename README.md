@@ -15,9 +15,9 @@ Documentação detalhada (fonte de verdade do repositório):
 - FastAPI com OpenAPI/Swagger, autenticação JWT e autorização por papel.
 - PostgreSQL com SQLAlchemy assíncrono e migração Alembic.
 - Times, campeonatos, partidas, estatísticas JSON extensíveis, jogadores, odds históricas, predições, credenciais e logs.
-- Ensemble **1.3**: forma recente + splits casa/fora + Dixon–Coles + ELO; value com de-vig, consenso, movimento de odd e H2H.
+- Ensemble **1.4**: forma + splits + Dixon–Coles/ELO (gols) e Poisson de escanteios/cartões/chutes via `TeamStat`; value com de-vig, consenso, movimento e H2H.
 - Probabilidade implícita, edge, EV/ROI esperado, Kelly fracionado, stake e força.
-- Mercados implementados no motor: 1X2, over/under 2,5 e ambas marcam. A estrutura aceita props, cartões, chutes, escanteios e handicaps ao adicionar o modelo específico.
+- Mercados no motor: 1X2, totals de gols (1,5/2,5/3,5), BTTS, escanteios, cartões (amarelos) e chutes (quando há odd).
 - PDF por partida com resumo, xG, value bets e gestão de banca.
 - Celery + Redis: pipeline diário, odds a cada 15 minutos (com retenção) e logs de sucesso/falha.
 - Painel admin no frontend (overview, providers, sync) protegido por JWT.
@@ -88,7 +88,7 @@ Filtros de data e campeonato são aceitos na listagem. A documentação completa
 
 Forças e ELO vêm de placares `finished`. O blend é **40% temporada + 60% forma** (últimos 8 jogos com decay). No kickoff, o mandante usa forças “em casa” e o visitante “fora”.
 
-Poisson + Dixon–Coles + ELO formam o **ensemble 1.3** (1X2; totals 1,5/2,5/3,5; BTTS).
+Poisson + Dixon–Coles + ELO formam o **ensemble 1.4** (1X2; totals de gols; BTTS). Escanteios, cartões e chutes usam Poisson sobre λ = média mandante (casa) + visitante (fora) do `TeamStat`.
 
 ```text
 probabilidade implícita justa = de-vig multiplicativo no mercado
@@ -108,6 +108,19 @@ Value exige EV ≥ 3%, edge ≥ 2%, Kelly mínimo e odd não “fofa” vs media
 - `FOOTBALL_DATA_KEY`: sincroniza os 380 jogos, resultados, horários e times do Brasileirão (`BSA`).
 - `ODDS_API_KEY`: captura odds atuais do Brasileirão e preserva casa, mercado, linha e horário (retenção das últimas capturas por chave).
 - `API_FUTEBOL_KEY` (ou o legado `API_FOOTBALL_KEY`): API Futebol brasileira (`api.api-futebol.com.br`), usada para estatísticas, escalações, cartões e arbitragem.
+- `API_SPORTS_KEY`: API-Sports/API-Football, usada para o histórico detalhado por jogador.
+- `API_SPORTS_HOST`: mantenha `https://v3.football.api-sports.io` para acesso direto.
+
+### Histórico individual das Séries A e B de 2024
+
+A API-Sports alimenta `player_match_stats` com minutos, titularidade, nota, chutes,
+passes, desarmes, interceptações, duelos, faltas, cartões e demais métricas por
+jogador/partida. O importador é retomável e divide a cota diária entre as duas
+divisões, cobrindo também clubes que estavam na Série B em 2024.
+
+- Progresso: `GET /api/v1/admin/sync/api-sports-progress?season=2024&division=A`
+- Importação manual: `POST /api/v1/admin/sync/api-sports-history?season=2024&division=B&limit=10`
+- Automação: diariamente às 06:45 (America/Sao_Paulo).
 
 No Swagger ou no painel `/admin`, autentique-se como administrador e use os endpoints de sync. Detalhes de uma partida são importados sob demanda por `POST /api/v1/admin/sync/api-futebol-match/{match_id}` para preservar a franquia. As rotinas gerais também são executadas pelo Celery Beat.
 
@@ -156,7 +169,8 @@ Antes de expor publicamente: TLS e reverse proxy; segredo JWT externo; rotação
 - xG/xA, big chances e métricas de jogadores via fornecedor licenciado.
 - Dixon–Coles e Poisson bivariado calibrados.
 - Pipeline ML temporal com MLflow/feature store e monitoramento de drift.
-- Linhas de cartões, escanteios, chutes e handicap com liquidação correta.
+- Handicap e props de jogador com liquidação correta.
+- Odds de total de chutes quando a Odds API/casa publicar para o Brasileirão.
 - Gestão de usuários completa, auditoria de ações e UI de credenciais.
 - Novas competições e esportes por adaptadores de domínio.
 

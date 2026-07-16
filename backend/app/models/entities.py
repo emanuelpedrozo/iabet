@@ -18,6 +18,19 @@ class TeamStat(Base, TimestampMixin):
     __tablename__="team_stats"; id: Mapped[int]=mapped_column(primary_key=True); team_id: Mapped[int]=mapped_column(ForeignKey("teams.id"),index=True); match_id: Mapped[int]=mapped_column(ForeignKey("matches.id"),index=True); is_home: Mapped[bool]=mapped_column(Boolean); metrics: Mapped[dict]=mapped_column(JSON,default=dict); __table_args__=(UniqueConstraint("team_id","match_id"),)
 class Player(Base, TimestampMixin):
     __tablename__="players"; id: Mapped[int]=mapped_column(primary_key=True); team_id: Mapped[int]=mapped_column(ForeignKey("teams.id"),index=True); name: Mapped[str]=mapped_column(String(120),index=True); position: Mapped[str]=mapped_column(String(30)); status: Mapped[str]=mapped_column(String(20),default="available"); start_probability: Mapped[float]=mapped_column(Float,default=.5); stats: Mapped[dict]=mapped_column(JSON,default=dict)
+class PlayerMatchStat(Base, TimestampMixin):
+    __tablename__="player_match_stats"
+    id: Mapped[int]=mapped_column(primary_key=True)
+    player_id: Mapped[int]=mapped_column(ForeignKey("players.id"),index=True)
+    team_id: Mapped[int]=mapped_column(ForeignKey("teams.id"),index=True)
+    match_id: Mapped[int]=mapped_column(ForeignKey("matches.id"),index=True)
+    is_home: Mapped[bool]=mapped_column(Boolean)
+    started: Mapped[bool]=mapped_column(Boolean,default=False)
+    minutes: Mapped[int|None]=mapped_column(Integer)
+    position: Mapped[str|None]=mapped_column(String(30))
+    rating: Mapped[float|None]=mapped_column(Float)
+    metrics: Mapped[dict]=mapped_column(JSON,default=dict)
+    __table_args__=(UniqueConstraint("player_id","match_id",name="uq_player_match_stats_player_match"),Index("ix_player_match_stats_team_match","team_id","match_id"),)
 class Odd(Base, TimestampMixin):
     __tablename__="odds"
     id: Mapped[int]=mapped_column(primary_key=True)
@@ -45,4 +58,3 @@ class ApiCredential(Base, TimestampMixin):
     __tablename__="api_credentials"; id: Mapped[int]=mapped_column(primary_key=True); provider: Mapped[str]=mapped_column(String(60),unique=True); encrypted_value: Mapped[str]=mapped_column(String(1000)); active: Mapped[bool]=mapped_column(Boolean,default=True)
 class JobLog(Base, TimestampMixin):
     __tablename__="job_logs"; id: Mapped[int]=mapped_column(primary_key=True); job: Mapped[str]=mapped_column(String(100),index=True); status: Mapped[str]=mapped_column(String(20)); detail: Mapped[dict]=mapped_column(JSON,default=dict)
-

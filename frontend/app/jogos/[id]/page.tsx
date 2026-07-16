@@ -1,196 +1,52 @@
-import { API, getAnalysis } from '@/lib/api';
-import { Download, ShieldAlert, TrendingUp } from 'lucide-react';
-import { notFound } from 'next/navigation';
+import {API,getAnalysis} from '@/lib/api';
+import {ArrowLeft,BarChart3,BookOpen,Download,ShieldAlert,Sparkles,Target,TrendingUp} from 'lucide-react';
+import {notFound} from 'next/navigation';
 
-type Prediction = {
-  home: number;
-  draw: number;
-  away: number;
-  score: string;
-  xg_home: number;
-  xg_away: number;
-  over_2_5: number;
-  btts_yes: number;
-};
+type Prediction={home:number;draw:number;away:number;score:string;xg_home:number;xg_away:number;over_2_5:number;btts_yes:number;xc_total?:number;xy_total?:number;xs_total?:number;corners_over_9_5?:number;cards_over_4_5?:number;shots_over_24_5?:number};
+type ValueBet={market:string;selection:string;line?:number|null;bookmaker?:string;odd:number;estimated_probability:number;implied_probability:number;edge:number;expected_roi?:number;suggested_stake_units:number;confidence?:number;strength?:string;odds_move_pct?:number|null;consensus_odd?:number|null;books_covering?:number};
 
-export default async function Analysis({ params }: { params: { id: string } }) {
-  let d;
-  try {
-    d = await getAnalysis(params.id);
-  } catch {
-    notFound();
-  }
-  const p = d.prediction as Prediction | null | undefined;
-  const m = d.match;
-  const valueBets = Array.isArray(d.value_bets) ? d.value_bets : [];
+export default async function Analysis({params,searchParams}:{params:{id:string};searchParams:{local?:string}}){
+  let d; try{d=await getAnalysis(params.id)}catch{notFound()}
+  const p=d.prediction as Prediction|null|undefined; const m=d.match;
+  const raw=(Array.isArray(d.value_bets)?d.value_bets:[]) as ValueBet[];
+  const values=uniqueValues(raw); const primary=values[0]; const alternatives=values.slice(1,5);
+  const venue=['home','away'].includes(searchParams.local||'')?searchParams.local!:'all';
+  const historical=d.historical_stats?{...d.historical_stats,home:d.historical_stats.home?.[venue],away:d.historical_stats.away?.[venue]}:null;
+  return <main className="mx-auto max-w-6xl px-5 pb-16 pt-7">
+    <a href="/" className="mb-6 inline-flex items-center gap-2 text-sm text-muted transition hover:text-white"><ArrowLeft size={16}/>Voltar aos jogos</a>
+    <header className="card overflow-hidden p-6 md:p-8"><div className="flex flex-col justify-between gap-6 md:flex-row md:items-center"><div><div className="label">{m.competition} · análise pré-jogo</div><div className="mt-5 flex items-center gap-4"><Team team={m.home_team}/><span className="text-xl text-muted">×</span><Team team={m.away_team}/></div><p className="mt-5 text-sm text-muted">{new Date(m.kickoff).toLocaleString('pt-BR')} · {m.venue||'Local a definir'}</p></div><a className="flex w-fit items-center gap-2 rounded-xl border border-line px-4 py-3 text-sm font-bold transition hover:border-brand/50 hover:text-brand" href={`${API}/reports/${m.id}.pdf`}><Download size={17}/>Baixar análise</a></div></header>
 
-  return (
-    <main className="mx-auto max-w-6xl px-5 py-10">
-      <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <div className="label">
-            {m.competition} • análise pré-jogo
-          </div>
-          <h1 className="mt-2 break-words text-2xl font-black md:text-4xl">
-            {m.home_team.name} <span className="text-muted">×</span> {m.away_team.name}
-          </h1>
-          <p className="mt-2 text-muted">
-            {new Date(m.kickoff).toLocaleString('pt-BR')} • {m.venue || 'A definir'}
-          </p>
+    {!p?<Pending/>:<>
+      <section className="mt-5 card p-5 md:p-6"><div className="mb-5 flex items-center justify-between"><div><div className="label">Leitura do modelo</div><h2 className="mt-1 text-lg font-bold">Probabilidade do resultado</h2></div><span className="rounded-full bg-white/[.04] px-3 py-1.5 text-xs text-muted">Placar provável <b className="ml-1 text-white">{p.score}</b></span></div><div className="grid gap-4 md:grid-cols-3"><Probability label={m.home_team.name} value={p.home} active={p.home>=p.draw&&p.home>=p.away}/><Probability label="Empate" value={p.draw} active={p.draw>=p.home&&p.draw>=p.away}/><Probability label={m.away_team.name} value={p.away} active={p.away>=p.home&&p.away>=p.draw}/></div></section>
+
+      <section className="mt-5 grid gap-5 lg:grid-cols-[1.65fr_1fr]">
+        <div className="space-y-5"><div className="card p-5 md:p-6"><div className="flex items-center gap-3"><span className="rounded-xl bg-brand/10 p-2.5 text-brand"><Sparkles size={20}/></span><div><div className="label text-brand">Melhor oportunidade</div><h2 className="mt-0.5 text-xl font-bold">Aposta com maior valor estimado</h2></div></div>{primary?<Primary bet={primary}/>:<NoValue/>}</div>
+          {alternatives.length>0&&<div className="card p-5 md:p-6"><div className="flex items-end justify-between"><div><div className="label">Outras linhas</div><h2 className="mt-1 text-lg font-bold">Alternativas com valor</h2></div><span className="text-xs text-muted">Melhor odd por mercado</span></div><div className="mt-4 divide-y divide-line">{alternatives.map((v,i)=><Alternative key={`${v.market}-${v.selection}-${v.line}-${i}`} bet={v}/>)}</div></div>}
         </div>
-        <a
-          className="flex items-center gap-2 rounded-xl bg-brand px-4 py-3 font-bold text-ink"
-          href={`${API}/reports/${m.id}.pdf`}
-          aria-label={`Baixar PDF da análise ${m.home_team.name} versus ${m.away_team.name}`}
-        >
-          <Download size={18} aria-hidden />
-          Gerar PDF
-        </a>
-      </div>
-
-      {!p ? (
-        <div role="status" className="card border-amber-900/40 p-6 text-amber-200">
-          <h2 className="text-xl font-bold">Predição pendente</h2>
-          <p className="mt-2 text-sm leading-6 text-muted">
-            O ensemble ainda não foi materializado para esta partida. Aguarde o próximo ciclo do
-            pipeline ou peça a um administrador para sincronizar as predições.
-          </p>
-        </div>
-      ) : (
-        <>
-          <section className="grid gap-4 md:grid-cols-4">
-            <Kpi label="Casa" value={`${Math.round(p.home * 100)}%`} />
-            <Kpi label="Empate" value={`${Math.round(p.draw * 100)}%`} />
-            <Kpi label="Fora" value={`${Math.round(p.away * 100)}%`} />
-            <Kpi label="Placar modal" value={p.score} />
-          </section>
-          <section className="mt-5 grid gap-5 lg:grid-cols-[1.5fr_1fr]">
-            <div className="card p-6">
-              <h2 className="text-xl font-bold">Value bets</h2>
-              <p className="mt-1 text-sm text-muted">
-                De-vig, consenso entre casas, movimento de odd e ranking por confiança.
-              </p>
-              <div className="mt-5 space-y-3">
-                {valueBets.length ? (
-                  valueBets.map(
-                    (
-                      v: {
-                        market: string;
-                        selection: string;
-                        line?: number | null;
-                        odd: number;
-                        estimated_probability: number;
-                        implied_probability: number;
-                        edge: number;
-                        suggested_stake_units: number;
-                        confidence?: number;
-                        strength?: string;
-                        odds_move_pct?: number | null;
-                        consensus_odd?: number | null;
-                        books_covering?: number;
-                      },
-                      i: number,
-                    ) => (
-                      <div key={i} className="rounded-xl border border-line p-4">
-                        <div className="flex justify-between gap-3">
-                          <b>
-                            {v.market} · {v.selection}
-                            {v.line != null ? ` (${v.line})` : ''}
-                            {i === 0 ? (
-                              <span className="ml-2 text-xs font-semibold text-brand">melhor</span>
-                            ) : null}
-                          </b>
-                          <span className="text-brand">{v.odd.toFixed(2)}</span>
-                        </div>
-                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3 lg:grid-cols-6">
-                          <Data
-                            label="Modelo"
-                            value={`${(v.estimated_probability * 100).toFixed(1)}%`}
-                          />
-                          <Data
-                            label="Justa"
-                            value={`${(v.implied_probability * 100).toFixed(1)}%`}
-                          />
-                          <Data label="Edge" value={`+${(v.edge * 100).toFixed(1)}%`} />
-                          <Data label="Stake" value={`${v.suggested_stake_units}u`} />
-                          <Data
-                            label="Confiança"
-                            value={
-                              typeof v.confidence === 'number'
-                                ? `${Math.round(v.confidence * 100)}%`
-                                : v.strength || '—'
-                            }
-                          />
-                          <Data
-                            label="Movimento"
-                            value={
-                              typeof v.odds_move_pct === 'number'
-                                ? `${v.odds_move_pct >= 0 ? '+' : ''}${(v.odds_move_pct * 100).toFixed(1)}%`
-                                : '—'
-                            }
-                          />
-                        </div>
-                        {typeof v.consensus_odd === 'number' ? (
-                          <p className="mt-2 text-xs text-muted">
-                            Consenso {v.consensus_odd.toFixed(2)}
-                            {v.books_covering ? ` · ${v.books_covering} casas` : ''}
-                          </p>
-                        ) : null}
-                      </div>
-                    ),
-                  )
-                ) : (
-                  <p className="rounded-xl bg-white/[.03] p-4 text-muted">
-                    Nenhuma linha supera o preço justo com os limiares atuais.
-                  </p>
-                )}
-              </div>
-            </div>
-            <div className="space-y-5">
-              <div className="card p-6">
-                <TrendingUp className="text-brand" aria-hidden />
-                <h2 className="mt-3 font-bold">Gols esperados</h2>
-                <div className="mt-4 flex justify-between text-3xl font-black">
-                  <span>{p.xg_home}</span>
-                  <span className="text-muted">—</span>
-                  <span>{p.xg_away}</span>
-                </div>
-                <div className="mt-4 text-sm text-muted">
-                  Over 2,5: {(p.over_2_5 * 100).toFixed(1)}%
-                  <br />
-                  Ambas marcam: {(p.btts_yes * 100).toFixed(1)}%
-                </div>
-              </div>
-              <div className="card p-6">
-                <ShieldAlert className="text-amber-300" aria-hidden />
-                <h2 className="mt-3 font-bold">Nota de risco</h2>
-                <p className="mt-2 text-sm leading-6 text-muted">
-                  Probabilidades são estimativas. Confirme escalações e preços; use stakes pequenas e
-                  limites de perda.
-                </p>
-              </div>
-            </div>
-          </section>
-        </>
-      )}
-    </main>
-  );
+        <aside className="space-y-5"><div className="card p-6"><div className="flex items-center gap-2 text-brand"><TrendingUp size={19}/><span className="label text-brand">Projeção de gols</span></div><div className="mt-5 grid grid-cols-[1fr_auto_1fr] items-center text-center"><Xg name={m.home_team.short_name} value={p.xg_home}/><span className="text-muted">—</span><Xg name={m.away_team.short_name} value={p.xg_away}/></div><div className="mt-5 space-y-3 border-t border-line pt-4"><MiniBar label="Mais de 2,5 gols" value={p.over_2_5}/><MiniBar label="Ambas marcam" value={p.btts_yes}/>{typeof p.corners_over_9_5==='number'&&<MiniBar label="Mais de 9,5 escanteios" value={p.corners_over_9_5}/>}{typeof p.cards_over_4_5==='number'&&<MiniBar label="Mais de 4,5 amarelos" value={p.cards_over_4_5}/>}{typeof p.shots_over_24_5==='number'&&<MiniBar label="Mais de 24,5 chutes" value={p.shots_over_24_5}/>}</div></div>
+          <div className="card p-6"><div className="flex items-center gap-2 text-amber-300"><ShieldAlert size={19}/><h2 className="font-bold text-white">Como interpretar</h2></div><p className="mt-3 text-sm leading-6 text-muted">Value não é garantia de acerto. Indica que a odd disponível está acima do preço justo estimado pelo modelo.</p><div className="mt-4 rounded-xl bg-amber-300/[.06] p-3 text-xs leading-5 text-amber-100/80">Confirme a odd e as escalações antes da entrada. A sugestão de stake já usa uma abordagem conservadora.</div></div>
+        </aside>
+      </section>
+      <Historical data={historical} home={m.home_team} away={m.away_team} matchId={params.id} venue={venue}/>
+    </>}
+  </main>;
 }
 
-function Kpi({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="card p-5">
-      <div className="label">{label}</div>
-      <b className="mt-2 block text-3xl">{value}</b>
-    </div>
-  );
-}
-
-function Data({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <span className="text-muted">{label}</span>
-      <b className="mt-1 block">{value}</b>
-    </div>
-  );
-}
+function uniqueValues(values:ValueBet[]){const map=new Map<string,ValueBet>();for(const v of values){const key=`${v.market}|${v.selection}|${v.line??''}`;const current=map.get(key);if(!current||v.odd>current.odd)map.set(key,v)}return Array.from(map.values()).sort((a,b)=>(b.expected_roi??b.edge)-(a.expected_roi??a.edge))}
+function marketName(v:ValueBet){const markets:Record<string,string>={match_result:'Resultado da partida',goals_2_5:'Total de gols',btts:'Ambas marcam',shots:'Finalizações',cards:'Cartões',corners:'Escanteios'};return markets[v.market]||v.market.replaceAll('_',' ')}
+function selectionName(v:ValueBet){const names:Record<string,string>={home:'Vitória do mandante',away:'Vitória do visitante',draw:'Empate',over:'Mais de',under:'Menos de',yes:'Sim',no:'Não'};const base=names[v.selection]||v.selection;return v.line!=null?`${base} ${v.line}`:base}
+function Primary({bet:v}:{bet:ValueBet}){return <div className="mt-5 overflow-hidden rounded-2xl border border-brand/25 bg-brand/[.035]"><div className="flex flex-col justify-between gap-4 border-b border-brand/15 p-5 sm:flex-row sm:items-center"><div><div className="text-xs text-muted">{marketName(v)}</div><h3 className="mt-1 text-xl font-black">{selectionName(v)}</h3><div className="mt-2 flex flex-wrap items-center gap-2 text-xs"><span className="rounded-full bg-white/[.05] px-2.5 py-1">{v.bookmaker||'Casa não informada'}</span>{v.confidence!=null&&<span className="rounded-full bg-brand/10 px-2.5 py-1 text-brand">Confiança {Math.round(v.confidence*100)}%</span>}</div></div><div className="sm:text-right"><div className="label">Odd disponível</div><div className="mt-1 text-4xl font-black text-brand">{v.odd.toFixed(2)}</div></div></div><div className="grid grid-cols-2 gap-px bg-line md:grid-cols-4"><Metric label="Prob. do modelo" value={percent(v.estimated_probability)} icon={<BarChart3/>}/><Metric label="Prob. da odd" value={percent(v.implied_probability)} icon={<BookOpen/>}/><Metric label="Vantagem" value={`+${percent(v.edge)}`} icon={<Target/>} accent/><Metric label="Stake sugerida" value={`${v.suggested_stake_units.toFixed(2)}u`} icon={<ShieldAlert/>}/></div>{v.expected_roi!=null&&<div className="flex justify-between px-5 py-3 text-xs text-muted"><span>Retorno esperado no longo prazo</span><b className="text-brand">+{percent(v.expected_roi)}</b></div>}</div>}
+function Alternative({bet:v}:{bet:ValueBet}){return <div className="grid gap-3 py-4 sm:grid-cols-[1fr_auto] sm:items-center"><div><div className="text-sm font-bold">{selectionName(v)} <span className="font-normal text-muted">· {marketName(v)}</span></div><div className="mt-1 text-xs text-muted">{v.bookmaker||'Casa não informada'} · Modelo {percent(v.estimated_probability)} · Mercado {percent(v.implied_probability)}</div></div><div className="flex items-center gap-5 sm:text-right"><div><div className="text-[10px] uppercase tracking-wider text-muted">Edge</div><b className="text-sm text-brand">+{percent(v.edge)}</b></div><div><div className="text-[10px] uppercase tracking-wider text-muted">Odd</div><b className="text-lg">{v.odd.toFixed(2)}</b></div></div></div>}
+function Team({team}:{team:any}){return <div className="flex items-center gap-3"><div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-line bg-white/[.04]">{team.crest_url?<img src={team.crest_url} alt="" className="h-11 w-11 object-contain"/>:<b>{team.short_name}</b>}</div><div><div className="text-xs text-muted">{team.short_name}</div><h1 className="text-xl font-black md:text-2xl">{team.name}</h1></div></div>}
+function Probability({label,value,active}:{label:string;value:number;active:boolean}){return <div className={`rounded-xl border p-4 ${active?'border-brand/30 bg-brand/[.04]':'border-line'}`}><div className="flex justify-between gap-3 text-sm"><span className="truncate text-muted">{label}</span><b className={active?'text-brand':''}>{percent(value)}</b></div><div className="bar mt-3"><span style={{width:percent(value)}}/></div></div>}
+function Metric({label,value,icon,accent}:{label:string;value:string;icon:React.ReactNode;accent?:boolean}){return <div className="bg-panel p-4"><div className={`mb-3 [&>svg]:h-4 [&>svg]:w-4 ${accent?'text-brand':'text-muted'}`}>{icon}</div><div className={`text-lg font-black ${accent?'text-brand':''}`}>{value}</div><div className="mt-1 text-[11px] text-muted">{label}</div></div>}
+function Xg({name,value}:{name:string;value:number}){return <div><div className="text-3xl font-black">{value.toFixed(2)}</div><div className="mt-1 text-xs text-muted">{name}</div></div>}
+function MiniBar({label,value}:{label:string;value:number}){return <div><div className="mb-1.5 flex justify-between text-xs"><span className="text-muted">{label}</span><b>{percent(value)}</b></div><div className="bar"><span style={{width:percent(value)}}/></div></div>}
+function NoValue(){return <div className="mt-5 rounded-2xl border border-line bg-white/[.02] p-6 text-center"><Target className="mx-auto text-muted"/><h3 className="mt-3 font-bold">Nenhuma aposta com valor agora</h3><p className="mt-1 text-sm text-muted">As odds atuais não superam os critérios mínimos do modelo.</p></div>}
+function Pending(){return <div className="card mt-5 border-amber-900/40 p-6 text-amber-200"><h2 className="text-xl font-bold">Predição pendente</h2><p className="mt-2 text-sm text-muted">A análise desta partida ainda está sendo processada.</p></div>}
+function Historical({data,home,away,matchId,venue}:{data:any;home:any;away:any;matchId:string;venue:string}){if(!data)return null;const hasData=(data.home?.sample||0)+(data.away?.sample||0)>0;const filters=[['all','Geral'],['home','Como mandante'],['away','Como visitante']];return <section className="card mt-5 p-5 md:p-6"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><div className="label">Base estatística detalhada</div><h2 className="mt-1 text-xl font-bold">Médias por partida — últimos 10 jogos</h2><p className="mt-1 text-sm text-muted">Somente os últimos 10 finished da competição atual — sem temporada antiga.</p></div><div className="flex rounded-xl border border-line bg-black/10 p-1">{filters.map(([key,label])=><a key={key} href={key==='all'?`/jogos/${matchId}`:`/jogos/${matchId}?local=${key}`} className={`rounded-lg px-3 py-2 text-xs transition ${venue===key?'bg-white/10 font-bold text-white':'text-muted hover:text-white'}`}>{label}</a>)}</div></div><div className="mt-3 text-right text-xs text-muted">No máximo 10 jogos por time nesta condição</div>{hasData?<><div className="mt-5 grid gap-4 md:grid-cols-2"><TeamHistory name={home.name} data={data.home}/><TeamHistory name={away.name} data={data.away}/></div><div className="mt-5 grid gap-4 lg:grid-cols-2"><PlayerHistory name={home.name} players={data.home?.players||[]}/><PlayerHistory name={away.name} players={data.away?.players||[]}/></div></>:<div className="mt-5 rounded-xl border border-line bg-white/[.02] p-5 text-sm text-muted">Ainda não existem partidas recentes detalhadas nesta condição. Selecione outro filtro ou aguarde as próximas importações.</div>}</section>}
+function TeamHistory({name,data}:{name:string;data:any}){const a=data?.averages||{};const period=data?.period_start&&data?.period_end?`${new Date(data.period_start+'T12:00:00').toLocaleDateString('pt-BR')}–${new Date(data.period_end+'T12:00:00').toLocaleDateString('pt-BR')}`:null;return <div className="rounded-xl border border-line p-4"><div className="flex justify-between gap-3"><div><b>{name}</b>{period&&<div className="mt-1 text-[10px] text-muted">Amostra: {period}</div>}</div><span className="text-xs text-muted">{data?.sample||0} de 10 jogos</span></div><div className="mt-4 grid grid-cols-3 gap-3"><Stat label="Chutes/jogo" value={a.total_shots}/><Stat label="No alvo/jogo" value={a.shots_on_goal}/><Stat label="Escanteios/jogo" value={a.corner_kicks}/><Stat label="Faltas/jogo" value={a.fouls}/><Stat label="Amarelos/jogo" value={a.yellow_cards}/><Stat label="xG médio" value={a.expected_goals}/></div></div>}
+function PlayerHistory({name,players}:{name:string;players:any[]}){return <div className="overflow-hidden rounded-xl border border-line"><div className="border-b border-line px-4 py-3"><b className="text-sm">Elenco recente observado · {name}</b><p className="mt-1 text-[11px] text-muted">Só atletas que atuaram nesses mesmos últimos 10 jogos; métricas só dessa amostra.</p></div>{players.length?<div className="divide-y divide-line">{players.slice(0,6).map((p:any)=><div key={p.name} className="grid grid-cols-[1fr_repeat(3,56px)] items-center gap-2 px-4 py-3 text-xs"><div className="min-w-0"><b className="block truncate text-sm">{p.name}</b><span className="text-muted">{p.appearances} jogos · {p.minutes} min</span></div><PlayerNumber label="Ch/90" value={p.shots_per90}/><PlayerNumber label="Des/90" value={p.tackles_per90}/><PlayerNumber label="Int/90" value={p.interceptions_per90}/></div>)}</div>:<p className="p-4 text-sm text-muted">Nenhum jogador com estatística nesses últimos 10 jogos.</p>}</div>}
+function Stat({label,value}:{label:string;value:any}){return <div><div className="text-[10px] uppercase tracking-wider text-muted">{label}</div><b className="mt-1 block">{value??'—'}</b></div>}
+function PlayerNumber({label,value}:{label:string;value:any}){return <div className="text-right"><div className="text-[9px] uppercase text-muted">{label}</div><b className="mt-1 block text-sm">{value??'—'}</b></div>}
+const percent=(n:number)=>`${(n*100).toFixed(1)}%`;

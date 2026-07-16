@@ -23,9 +23,9 @@ def test_dixon_coles_increases_00_when_rho_negative():
     assert dc[0, 0] > indep[0, 0]
 
 
-def test_ensemble_13_exposes_extra_totals_lines():
+def test_ensemble_14_exposes_extra_totals_lines():
     p = ensemble(ModelInput(1.1, 0.9, 0.95, 1.05, 1600, 1500))
-    assert p["version"] == "ensemble-1.3"
+    assert p["version"] == "ensemble-1.4"
     assert "over_1_5" in p and "over_3_5" in p
     assert abs(p["home"] + p["draw"] + p["away"] - 1) < 0.01
 
