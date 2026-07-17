@@ -237,8 +237,30 @@ async def historical_detail(
         clean = [value for value in values if value is not None]
         averages[key] = round(sum(clean) / len(clean), 2) if clean else None
 
-    # Elenco: só quem jogou nesses mesmos últimos N jogos.
-    recent_match_ids = [match.id for _, match in team_rows]
+    # Scouts individuais não dependem de TeamStat. O Cartola pode fornecer
+    # PlayerMatchStat mesmo quando não há estatística coletiva para a partida.
+    player_conditions = [
+        PlayerMatchStat.team_id == team_id,
+        Match.status == MatchStatus.finished,
+        Match.kickoff < reference_date,
+    ]
+    if competition_id is not None:
+        player_conditions.append(Match.competition_id == competition_id)
+    if venue == "home":
+        player_conditions.append(Match.home_team_id == team_id)
+    elif venue == "away":
+        player_conditions.append(Match.away_team_id == team_id)
+    player_match_rows = (
+        await session.execute(
+            select(Match.id, Match.kickoff)
+            .join(PlayerMatchStat, PlayerMatchStat.match_id == Match.id)
+            .where(*player_conditions)
+            .distinct()
+            .order_by(Match.kickoff.desc())
+            .limit(limit)
+        )
+    ).all()
+    recent_match_ids = [match_id for match_id, _ in player_match_rows]
     players: list[dict] = []
     if recent_match_ids:
         player_rows = (
@@ -386,9 +408,11 @@ async def historical_detail(
             reverse=True,
         )
 
-    dates = [match.kickoff.date().isoformat() for _, match in team_rows]
+    dates = [kickoff.date().isoformat() for _, kickoff in player_match_rows]
+    if not dates:
+        dates = [match.kickoff.date().isoformat() for _, match in team_rows]
     return {
-        "sample": len(team_rows),
+        "sample": max(len(team_rows), len(player_match_rows)),
         "sample_max": limit,
         "averages": averages,
         "players": players[:12],
