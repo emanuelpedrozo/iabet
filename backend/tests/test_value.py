@@ -44,6 +44,20 @@ def test_low_probability_value_is_speculative_not_recommended():
     assert item["risk_profile"] == "especulativa"
 
 
+def test_result_against_model_favorite_is_never_the_main_recommendation():
+    item = evaluate(
+        "match_result",
+        "away",
+        4.15,
+        0.31,
+        "Demo",
+        pred={"home": 0.42, "draw": 0.27, "away": 0.31},
+    )
+    assert item["is_value"] is True
+    assert item["aligned_with_model"] is False
+    assert item["recommended"] is False
+
+
 def test_evaluate_rejects_soft_consensus():
     item = evaluate(
         "match_result",

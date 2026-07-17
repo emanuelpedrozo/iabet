@@ -40,7 +40,7 @@ export function MatchCard({ m, index }: { m: Match; index: number }) {
         </div>
         {m.best_value && (
           <span className="shrink-0 rounded-full bg-brand/10 px-2.5 py-1 text-xs font-semibold text-brand">
-            EV +{pct(m.best_value.edge)}
+            Value +{pct(m.best_value.edge)}
           </span>
         )}
       </div>
@@ -72,9 +72,7 @@ export function MatchCard({ m, index }: { m: Match; index: number }) {
             </div>
           </div>
         ) : (
-          <div className="rounded-xl bg-white/[.03] p-3 text-sm text-muted">
-            Sem value confirmado no preço atual
-          </div>
+          <ModelPick m={m} />
         )}
         <div className="mt-4 flex gap-2">
           <Link
@@ -93,6 +91,33 @@ export function MatchCard({ m, index }: { m: Match; index: number }) {
         </div>
       </div>
     </motion.article>
+  );
+}
+
+function ModelPick({ m }: { m: Match }) {
+  const pick = m.model_pick;
+  if (!pick) {
+    return <div className="rounded-xl bg-white/[.03] p-3 text-sm text-muted">Análise em processamento</div>;
+  }
+  const label = pick.selection === 'home'
+    ? `Vitória do ${m.home_team.name}`
+    : pick.selection === 'away'
+      ? `Vitória do ${m.away_team.name}`
+      : 'Empate';
+  return (
+    <div className="rounded-xl border border-line bg-white/[.025] p-3">
+      <div className="flex items-center justify-between gap-3 text-xs text-muted">
+        <span>Resultado mais provável</span>
+        <b className="text-white">{pct(pick.estimated_probability)}</b>
+      </div>
+      <div className="mt-1 flex items-end justify-between gap-3">
+        <b className="truncate">{label}</b>
+        {pick.odd != null && <b className="shrink-0 text-lg">{pick.odd.toFixed(2)}</b>}
+      </div>
+      <div className="mt-1 text-[11px] text-muted">
+        Odd justa {pick.fair_odd?.toFixed(2) ?? '—'} · sem value no preço atual
+      </div>
+    </div>
   );
 }
 

@@ -151,12 +151,34 @@ def serialize(m, **value_kwargs) -> dict:
             "favorite": None,
             "probabilities": None,
             "best_value": None,
+            "model_pick": None,
         }
     vals = values_for(m, p, **value_kwargs)
     winner = max(("home", "draw", "away"), key=p.get)
     favorite = (
         m.home_team.name if winner == "home" else m.away_team.name if winner == "away" else "Empate"
     )
+    latest_result_odds = {}
+    for odd in sorted(m.odds, key=lambda row: row.captured_at, reverse=True):
+        if odd.market == "match_result" and odd.selection not in latest_result_odds:
+            latest_result_odds[odd.selection] = odd
+    winner_odd = latest_result_odds.get(winner)
+    winner_probability = float(p[winner])
+    winner_has_value = any(
+        value["market"] == "match_result"
+        and value["selection"] == winner
+        and value["is_value"]
+        for value in vals
+    )
+    model_pick = {
+        "market": "match_result",
+        "selection": winner,
+        "odd": float(winner_odd.price) if winner_odd else None,
+        "estimated_probability": round(winner_probability, 4),
+        "fair_odd": round(1 / winner_probability, 2) if winner_probability else None,
+        "has_value": winner_has_value,
+        "price_status": "com_value" if winner_has_value else "sem_value",
+    }
     return {
         "id": m.id,
         "kickoff": m.kickoff,
@@ -168,6 +190,7 @@ def serialize(m, **value_kwargs) -> dict:
         "favorite": favorite,
         "probabilities": {k: p[k] for k in ("home", "draw", "away")},
         "best_value": next((value for value in vals if value["recommended"]), None),
+        "model_pick": model_pick,
     }
 
 

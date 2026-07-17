@@ -190,8 +190,14 @@ def evaluate(
         odds_falling=falling,
         h2h_over_boost=h2h_over_boost,
     )
+    model_favorite = max(
+        ("home", "draw", "away"),
+        key=lambda result: float((pred or {}).get(result, 0)),
+    )
+    aligned_with_model = market != "match_result" or selection == model_favorite
     recommended = bool(
         is_value
+        and aligned_with_model
         and probability >= MIN_RECOMMENDED_PROBABILITY
         and conf >= MIN_RECOMMENDED_CONFIDENCE
         and odd <= MAX_RECOMMENDED_ODD
@@ -215,6 +221,7 @@ def evaluate(
         "strength": classify(edge),
         "confidence": conf,
         "recommended": recommended,
+        "aligned_with_model": aligned_with_model,
         "risk_profile": "conservadora" if recommended else "especulativa",
         "rank_score": score,
         "decision_score": round(score * (0.5 + probability), 4),

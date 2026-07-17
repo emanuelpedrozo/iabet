@@ -23,6 +23,15 @@ export type Match = {
   away_team: Team;
   favorite: string | null;
   probabilities: { home: number; draw: number; away: number } | null;
+  model_pick?: {
+    market: string;
+    selection: 'home' | 'draw' | 'away';
+    odd: number | null;
+    estimated_probability: number;
+    fair_odd: number | null;
+    has_value: boolean;
+    price_status: string;
+  } | null;
   best_value?: {
     market: string;
     selection: string;
