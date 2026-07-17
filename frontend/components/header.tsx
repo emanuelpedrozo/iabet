@@ -14,6 +14,7 @@ export function Header() {
 
   const jogosActive = pathname === '/';
   const adminActive = pathname.startsWith('/admin');
+  const ajudaActive = pathname.startsWith('/ajuda');
 
   function close() {
     setOpen(false);
@@ -43,6 +44,9 @@ export function Header() {
           </Link>
           <Link href="/#value" className={linkClass(false)}>
             Value bets
+          </Link>
+          <Link href="/ajuda" className={linkClass(ajudaActive)}>
+            Ajuda
           </Link>
           {loggedIn && (
             <Link href="/admin" className={linkClass(adminActive)}>
@@ -84,6 +88,11 @@ export function Header() {
             <li>
               <Link href="/#value" className={linkClass(false)} onClick={close}>
                 Value bets
+              </Link>
+            </li>
+            <li>
+              <Link href="/ajuda" className={linkClass(ajudaActive)} onClick={close}>
+                Ajuda
               </Link>
             </li>
             {loggedIn && (
