@@ -61,6 +61,24 @@ def import_api_futebol_history():
     return asyncio.run(_run_logged("import_api_futebol_history", work))
 
 
+@celery_app.task(name="app.workers.tasks.sync_today_matches")
+def sync_today_matches():
+    async def work():
+        async with SessionLocal() as s:
+            return await DataSyncService(s).sync_today_matches()
+
+    return asyncio.run(_run_logged("sync_today_matches", work))
+
+
+@celery_app.task(name="app.workers.tasks.import_cartola_recent")
+def import_cartola_recent():
+    async def work():
+        async with SessionLocal() as s:
+            return await DataSyncService(s).import_cartola_recent(10)
+
+    return asyncio.run(_run_logged("import_cartola_recent", work))
+
+
 @celery_app.task(name="app.workers.tasks.refresh_predictions")
 def refresh_predictions():
     async def work():

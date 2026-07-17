@@ -9,6 +9,7 @@ from app.providers.api_futebol import ApiFutebolProvider
 from app.providers.football_data import FootballDataProvider
 from app.providers.odds_api import OddsApiProvider
 from app.providers.api_sports import ApiSportsProvider
+from app.providers.cartola import CartolaProvider
 from app.services.sync import DataSyncService
 
 router = APIRouter(prefix="/admin", tags=["Admin"], dependencies=[Depends(admin)])
@@ -60,6 +61,7 @@ async def providers():
         await safe("odds_api", OddsApiProvider().usage),
         await safe("api_futebol", ApiFutebolProvider().status),
         await safe("api_sports", ApiSportsProvider().status),
+        await safe("cartola", CartolaProvider().status),
     ]
 
 
@@ -100,6 +102,22 @@ async def sync_api_futebol_history(limit: int = 80, session: AsyncSession = Depe
     try:
         return await DataSyncService(session).import_api_futebol_history(limit)
     except ValueError as exc:
+        raise _map_sync_error(exc) from exc
+
+
+@router.post("/sync/today-matches")
+async def sync_today_matches(session: AsyncSession = Depends(get_session)):
+    try:
+        return await DataSyncService(session).sync_today_matches()
+    except ValueError as exc:
+        raise _map_sync_error(exc) from exc
+
+
+@router.post("/sync/cartola-recent")
+async def sync_cartola_recent(rounds: int = 10, session: AsyncSession = Depends(get_session)):
+    try:
+        return await DataSyncService(session).import_cartola_recent(min(max(rounds, 1), 10))
+    except (ValueError, RuntimeError) as exc:
         raise _map_sync_error(exc) from exc
 
 

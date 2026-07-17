@@ -269,39 +269,120 @@ async def historical_detail(
         for entry in grouped.values():
             rows = entry.pop("rows")
             minutes = sum(row.minutes or 0 for row in rows)
-            if minutes <= 0:
-                continue
             totals = {
                 "shots": 0.0,
                 "shots_on_target": 0.0,
                 "tackles": 0.0,
                 "interceptions": 0.0,
                 "fouls": 0.0,
+                "fouls_drawn": 0.0,
                 "yellow_cards": 0.0,
+                "red_cards": 0.0,
+                "goals": 0.0,
+                "assists": 0.0,
+                "goalkeeper_saves": 0.0,
+                "penalties_saved": 0.0,
+                "goals_conceded": 0.0,
+                "clean_sheets": 0.0,
+            }
+            hits = {
+                "shot_1_plus": 0,
+                "shot_2_plus": 0,
+                "shot_on_target_1_plus": 0,
+                "tackle_2_plus": 0,
+                "card_any": 0,
+                "yellow_card_any": 0,
+                "red_card_any": 0,
+                "goal_any": 0,
+                "assist_any": 0,
+                "save_3_plus": 0,
+                "save_4_plus": 0,
+                "clean_sheet": 0,
             }
             for row in rows:
                 metrics = row.metrics or {}
-                totals["shots"] += _number((metrics.get("shots") or {}).get("total")) or 0
-                totals["shots_on_target"] += _number((metrics.get("shots") or {}).get("on")) or 0
-                totals["tackles"] += _number((metrics.get("tackles") or {}).get("total")) or 0
+                shots = _number((metrics.get("shots") or {}).get("total")) or 0
+                shots_on = _number((metrics.get("shots") or {}).get("on")) or 0
+                tackles = _number((metrics.get("tackles") or {}).get("total")) or 0
+                yellow = _number((metrics.get("cards") or {}).get("yellow")) or 0
+                red = _number((metrics.get("cards") or {}).get("red")) or 0
+                goals = _number((metrics.get("goals") or {}).get("total")) or 0
+                assists = _number((metrics.get("goals") or {}).get("assists")) or 0
+                saves = _number((metrics.get("goalkeeper") or {}).get("saves")) or 0
+                penalties_saved = _number((metrics.get("goalkeeper") or {}).get("penalties_saved")) or 0
+                goals_conceded = _number((metrics.get("goalkeeper") or {}).get("goals_conceded")) or 0
+                clean_sheet = _number((metrics.get("goalkeeper") or {}).get("clean_sheet")) or 0
+                totals["shots"] += shots
+                totals["shots_on_target"] += shots_on
+                totals["tackles"] += tackles
                 totals["interceptions"] += (
                     _number((metrics.get("tackles") or {}).get("interceptions")) or 0
                 )
                 totals["fouls"] += _number((metrics.get("fouls") or {}).get("committed")) or 0
-                totals["yellow_cards"] += _number((metrics.get("cards") or {}).get("yellow")) or 0
+                totals["fouls_drawn"] += _number((metrics.get("fouls") or {}).get("drawn")) or 0
+                totals["yellow_cards"] += yellow
+                totals["red_cards"] += red
+                totals["goals"] += goals
+                totals["assists"] += assists
+                totals["goalkeeper_saves"] += saves
+                totals["penalties_saved"] += penalties_saved
+                totals["goals_conceded"] += goals_conceded
+                totals["clean_sheets"] += clean_sheet
+                hits["shot_1_plus"] += int(shots >= 1)
+                hits["shot_2_plus"] += int(shots >= 2)
+                hits["shot_on_target_1_plus"] += int(shots_on >= 1)
+                hits["tackle_2_plus"] += int(tackles >= 2)
+                hits["card_any"] += int(yellow + red >= 1)
+                hits["yellow_card_any"] += int(yellow >= 1)
+                hits["red_card_any"] += int(red >= 1)
+                hits["goal_any"] += int(goals >= 1)
+                hits["assist_any"] += int(assists >= 1)
+                hits["save_3_plus"] += int(saves >= 3)
+                hits["save_4_plus"] += int(saves >= 4)
+                hits["clean_sheet"] += int(clean_sheet >= 1)
+            appearances = len(rows)
+            if appearances <= 1:
+                continue
+            recent_card_rows = rows[:5]
+            recent_card_hits = sum(
+                int(
+                    (_number(((row.metrics or {}).get("cards") or {}).get("yellow")) or 0)
+                    + (_number(((row.metrics or {}).get("cards") or {}).get("red")) or 0)
+                    >= 1
+                )
+                for row in recent_card_rows
+            )
             players.append(
                 {
                     **entry,
-                    "appearances": len(rows),
-                    "minutes": minutes,
+                    "appearances": appearances,
+                    "minutes": minutes or None,
                     **{
-                        f"{key}_per90": round(value * 90 / minutes, 2)
+                        f"{key}_per_game": round(value / appearances, 2)
                         for key, value in totals.items()
                     },
+                    **{
+                        f"{key}_per90": round(value * 90 / minutes, 2) if minutes else None
+                        for key, value in totals.items()
+                    },
+                    "hit_rates": {
+                        **{key: round(value / appearances, 3) for key, value in hits.items()},
+                        "card_any_last_5": round(
+                            recent_card_hits / len(recent_card_rows), 3
+                        ),
+                    },
+                    "carded_games": hits["card_any"],
+                    "yellow_card_games": hits["yellow_card_any"],
+                    "red_card_games": hits["red_card_any"],
                 }
             )
         players.sort(
-            key=lambda item: (item["shots_per90"] + item["tackles_per90"], item["minutes"]),
+            key=lambda item: (
+                item["appearances"],
+                item["shots_per_game"]
+                + item["tackles_per_game"]
+                + item["goalkeeper_saves_per_game"],
+            ),
             reverse=True,
         )
 

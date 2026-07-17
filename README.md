@@ -111,20 +111,30 @@ Value exige EV ≥ 3%, edge ≥ 2%, Kelly mínimo e odd não “fofa” vs media
 - `API_SPORTS_KEY`: API-Sports/API-Football, usada para o histórico detalhado por jogador.
 - `API_SPORTS_HOST`: mantenha `https://v3.football.api-sports.io` para acesso direto.
 
-### Histórico individual das Séries A e B de 2024
+### Scouts individuais via Cartola
+
+O endpoint público do Cartola é usado sem chave para importar as 10 rodadas concluídas
+mais recentes da Série A. Os scouts alimentam `player_match_stats` com finalizações
+(`G`, `FD`, `FF`, `FT`), desarmes (`DS`), faltas, cartões e defesas de goleiro (`DE`).
+
+- Importação manual: `POST /api/v1/admin/sync/cartola-recent?rounds=10`
+- Automação: diariamente às 04:15 (America/Sao_Paulo).
+- A integração é idempotente e atualiza os registros se o Cartola revisar uma rodada.
+
+### Histórico legado opcional da API-Sports
 
 A API-Sports alimenta `player_match_stats` com minutos, titularidade, nota, chutes,
 passes, desarmes, interceptações, duelos, faltas, cartões e demais métricas por
-jogador/partida. O importador é retomável e divide a cota diária entre as duas
-divisões, cobrindo também clubes que estavam na Série B em 2024.
+jogador/partida. No plano gratuito, o importador fica restrito a 2024 e só é
+executado manualmente; ele não faz parte da rotina diária.
 
 - Progresso: `GET /api/v1/admin/sync/api-sports-progress?season=2024&division=A`
 - Importação manual: `POST /api/v1/admin/sync/api-sports-history?season=2024&division=B&limit=10`
-- Automação: diariamente às 06:45 (America/Sao_Paulo).
 
 No Swagger ou no painel `/admin`, autentique-se como administrador e use os endpoints de sync. Detalhes de uma partida são importados sob demanda por `POST /api/v1/admin/sync/api-futebol-match/{match_id}` para preservar a franquia. As rotinas gerais também são executadas pelo Celery Beat.
 
-O plano gratuito da API Futebol permite 100 chamadas diárias. A carga histórica automática roda às 06:15 (America/Sao_Paulo) e importa no máximo 80 partidas ainda ausentes, deixando margem para diagnóstico e atualização corrente. O processo é idempotente e continua no dia seguinte.
+O job da API Futebol consulta somente os jogos do dia, de hora em hora entre 10h e
+23h, com intervalos internos para preservar a cota. O processo é idempotente.
 
 Para criar um provider:
 

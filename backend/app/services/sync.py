@@ -1,12 +1,14 @@
 import re
 import unicodedata
 import httpx
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.models.entities import Competition, Match, MatchStatus, Odd, Player, PlayerMatchStat, Prediction, Team, TeamStat
 from app.providers.api_sports import ApiSportsProvider
+from app.providers.cartola import CartolaProvider, cartola_metrics
 from app.providers.football_data import FootballDataProvider
 from app.providers.odds_api import EVENT_STAT_MARKETS, OddsApiProvider
 from app.providers.api_futebol import ApiFutebolProvider
@@ -604,6 +606,221 @@ class DataSyncService:
             "statistics": bool(stats),
             "lineups": bool(lineups),
             "cards": bool(data.get("cartoes")),
+        }
+
+    async def sync_today_matches(self) -> dict:
+        """Atualiza somente os jogos do dia, com throttle para preservar a cota."""
+        now = datetime.now(timezone.utc)
+        local_now = now.astimezone(ZoneInfo("America/Sao_Paulo"))
+        start_local = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_local = start_local + timedelta(days=1)
+        start = start_local.astimezone(timezone.utc)
+        end = end_local.astimezone(timezone.utc)
+
+        matches = list(
+            await self.session.scalars(
+                select(Match)
+                .where(Match.kickoff >= start, Match.kickoff < end)
+                .order_by(Match.kickoff)
+            )
+        )
+        if any(not ((m.metadata_ or {}).get("external_ids") or {}).get("api_futebol") for m in matches):
+            await self.sync_api_futebol_index()
+            matches = list(
+                await self.session.scalars(
+                    select(Match)
+                    .where(Match.kickoff >= start, Match.kickoff < end)
+                    .order_by(Match.kickoff)
+                )
+            )
+
+        imported: list[int] = []
+        skipped: list[dict] = []
+        errors: list[dict] = []
+        for match in matches:
+            external = ((match.metadata_ or {}).get("external_ids") or {}).get("api_futebol")
+            if not external:
+                skipped.append({"match_id": match.id, "reason": "not_linked"})
+                continue
+            # Não consulta jogos que terminaram há mais de quatro horas.
+            if now > match.kickoff + timedelta(hours=4):
+                skipped.append({"match_id": match.id, "reason": "window_closed"})
+                continue
+            api_meta = ((match.metadata_ or {}).get("api_futebol") or {})
+            last_raw = api_meta.get("last_today_sync_at")
+            last_sync = datetime.fromisoformat(last_raw) if last_raw else None
+            min_interval = timedelta(hours=1 if now >= match.kickoff else 3)
+            if last_sync and now - last_sync < min_interval:
+                skipped.append({"match_id": match.id, "reason": "throttled"})
+                continue
+            try:
+                await self.sync_api_futebol_match(match.id)
+                await self.session.refresh(match)
+                meta = dict(match.metadata_ or {})
+                current_api_meta = dict(meta.get("api_futebol") or {})
+                current_api_meta["last_today_sync_at"] = now.isoformat()
+                meta["api_futebol"] = current_api_meta
+                match.metadata_ = meta
+                await self.session.commit()
+                imported.append(match.id)
+            except Exception as exc:
+                errors.append({"match_id": match.id, "error": str(exc)[:160]})
+
+        predictions = await self.refresh_predictions() if imported else {"updated": 0}
+        return {
+            "provider": "api_futebol",
+            "date": local_now.date().isoformat(),
+            "matches": len(matches),
+            "imported": imported,
+            "skipped": skipped,
+            "errors": errors,
+            "predictions": predictions,
+        }
+
+    async def import_cartola_recent(self, rounds: int = 10) -> dict:
+        """Importa scouts individuais das últimas rodadas concluídas do Cartola."""
+        provider = CartolaProvider()
+        market = await provider.round_status()
+        current_round = int(market.get("rodada_atual") or 1)
+        round_numbers = list(range(max(1, current_round - max(1, rounds)), current_round))
+        season_matches = list(
+            await self.session.scalars(
+                select(Match)
+                .join(Competition, Competition.id == Match.competition_id)
+                .where(Competition.season == str(datetime.now().year))
+                .options(selectinload(Match.home_team), selectinload(Match.away_team))
+            )
+        )
+        positions = {1: "GOL", 2: "LAT", 3: "ZAG", 4: "MEI", 5: "ATA"}
+        team_ids = {m.home_team_id for m in season_matches} | {m.away_team_id for m in season_matches}
+        all_players = list(
+            await self.session.scalars(select(Player).where(Player.team_id.in_(team_ids)))
+        )
+        players_by_cartola = {
+            (p.team_id, str((p.stats or {}).get("cartola_id"))): p
+            for p in all_players
+            if (p.stats or {}).get("cartola_id")
+        }
+        players_by_name = {(p.team_id, normalize(p.name)): p for p in all_players}
+        match_ids = [m.id for m in season_matches]
+        existing_stats = list(
+            await self.session.scalars(
+                select(PlayerMatchStat).where(PlayerMatchStat.match_id.in_(match_ids))
+            )
+        )
+        stats_by_player_match = {(s.player_id, s.match_id): s for s in existing_stats}
+        imported_rounds: list[int] = []
+        matched_fixtures = created = updated = 0
+        unmatched: list[dict] = []
+
+        for round_number in round_numbers:
+            fixture_data = await provider.fixtures(round_number)
+            score_data = await provider.scored_players(round_number)
+            clubs = fixture_data.get("clubes") or {}
+            club_names = {
+                int(club_id): (club.get("nome_fantasia") or club.get("slug") or club.get("nome"))
+                for club_id, club in clubs.items()
+            }
+            by_club: dict[int, tuple[Match, bool]] = {}
+            for fixture in fixture_data.get("partidas") or []:
+                home_id = int(fixture.get("clube_casa_id") or 0)
+                away_id = int(fixture.get("clube_visitante_id") or 0)
+                home_name, away_name = club_names.get(home_id), club_names.get(away_id)
+                local_match = next(
+                    (
+                        match
+                        for match in season_matches
+                        if home_name
+                        and away_name
+                        and normalize(match.home_team.name) == normalize(home_name)
+                        and normalize(match.away_team.name) == normalize(away_name)
+                    ),
+                    None,
+                )
+                if not local_match:
+                    unmatched.append(
+                        {"round": round_number, "home": home_name, "away": away_name}
+                    )
+                    continue
+                matched_fixtures += 1
+                by_club[home_id] = (local_match, True)
+                by_club[away_id] = (local_match, False)
+                meta = dict(local_match.metadata_ or {})
+                cartola = dict(meta.get("cartola") or {})
+                cartola.update({"round": round_number, "match_id": fixture.get("partida_id")})
+                meta["cartola"] = cartola
+                local_match.metadata_ = meta
+
+            for athlete_id, athlete in (score_data.get("atletas") or {}).items():
+                if not athlete.get("entrou_em_campo"):
+                    continue
+                club_id = int(athlete.get("clube_id") or 0)
+                target = by_club.get(club_id)
+                position_id = int(athlete.get("posicao_id") or 0)
+                if not target or position_id not in positions:
+                    continue
+                match, is_home = target
+                team = match.home_team if is_home else match.away_team
+                player = players_by_cartola.get((team.id, str(athlete_id)))
+                name = athlete.get("apelido") or f"Atleta {athlete_id}"
+                if not player:
+                    player = players_by_name.get((team.id, normalize(name)))
+                player_payload = {
+                    "cartola_id": str(athlete_id),
+                    "photo": athlete.get("foto"),
+                    "last_cartola_round": round_number,
+                }
+                if not player:
+                    player = Player(
+                        team_id=team.id,
+                        name=name,
+                        position=positions[position_id],
+                        status="available",
+                        stats=player_payload,
+                    )
+                    self.session.add(player)
+                    await self.session.flush()
+                    players_by_name[(team.id, normalize(name))] = player
+                else:
+                    player.position = positions[position_id]
+                    player.status = "available"
+                    player.stats = {**(player.stats or {}), **player_payload}
+                players_by_cartola[(team.id, str(athlete_id))] = player
+
+                existing = stats_by_player_match.get((player.id, match.id))
+                metrics = cartola_metrics(athlete.get("scout"))
+                metrics["cartola_points"] = athlete.get("pontuacao")
+                values = {
+                    "team_id": team.id,
+                    "is_home": is_home,
+                    "started": False,
+                    "minutes": None,
+                    "position": positions[position_id],
+                    "metrics": metrics,
+                }
+                if existing:
+                    existing.team_id = team.id
+                    existing.is_home = is_home
+                    existing.position = positions[position_id]
+                    existing.metrics = {**(existing.metrics or {}), **metrics}
+                    updated += 1
+                else:
+                    new_stat = PlayerMatchStat(player_id=player.id, match_id=match.id, **values)
+                    self.session.add(new_stat)
+                    stats_by_player_match[(player.id, match.id)] = new_stat
+                    created += 1
+            imported_rounds.append(round_number)
+            await self.session.commit()
+
+        return {
+            "provider": "cartola",
+            "current_round": current_round,
+            "rounds": imported_rounds,
+            "matched_fixtures": matched_fixtures,
+            "player_stats_created": created,
+            "player_stats_updated": updated,
+            "unmatched": unmatched[:20],
+            "unmatched_count": len(unmatched),
         }
 
     async def import_api_futebol_history(self, limit: int = 80) -> dict:
