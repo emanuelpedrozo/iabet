@@ -169,6 +169,41 @@ docker compose run --rm api alembic revision --autogenerate -m "descricao"
 docker compose run --rm api alembic upgrade head
 ```
 
+## Deploy isolado por IP
+
+O arquivo `compose.prod.yml` publica somente o gateway na porta `13001`. API,
+PostgreSQL, Redis, frontend e workers permanecem na rede privada do projeto Compose
+`iabet`, sem compartilhar volumes ou redes com outras aplicações do servidor.
+
+Preparação inicial no servidor:
+
+```bash
+mkdir -p /opt/iabet
+cd /opt/iabet
+cp .env.prod.example .env
+# preencha senhas e chaves diretamente no servidor
+docker compose -p iabet -f compose.prod.yml up -d --build
+curl http://127.0.0.1:13001/health
+```
+
+O acesso será `http://46.225.12.24:13001`. A porta `13001/tcp` precisa estar
+liberada no firewall do provedor e/ou no firewall local, sem alterar regras de
+portas usadas por outros projetos.
+
+O workflow `.github/workflows/deploy.yml` executa o deploy depois de um CI bem
+sucedido na `main`. Configure o ambiente `production` e estes GitHub Secrets:
+
+| Secret | Exemplo/uso |
+|---|---|
+| `DEPLOY_HOST` | `46.225.12.24` |
+| `DEPLOY_USER` | usuário SSH autorizado a executar Docker |
+| `DEPLOY_PATH` | `/opt/iabet` |
+| `DEPLOY_SSH_KEY` | chave privada exclusiva do CI/CD |
+
+O `.env` de produção nunca é copiado ou removido pelo workflow. O deploy executa
+Compose apenas com `-p iabet -f compose.prod.yml`; não usa `prune`, não derruba
+stacks globais e não acessa os volumes de outros projetos.
+
 ## Produção (roadmap)
 
 Antes de expor publicamente: TLS e reverse proxy; segredo JWT externo; rotação de credenciais; backup/PITR do PostgreSQL; réplicas de workers; filas separadas por SLA; Sentry/OpenTelemetry; métricas Prometheus; política LGPD; termos de uso; alertas de jogo responsável; testes de carga e análise de segurança; cookie httpOnly no lugar de `localStorage`; criptografia de envelope para `api_credentials`.
