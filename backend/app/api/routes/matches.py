@@ -130,7 +130,11 @@ def values_for(
         )
         if item["is_value"]:
             out.append(item)
-    return sorted(out, key=lambda x: x["rank_score"], reverse=True)
+    return sorted(
+        out,
+        key=lambda x: (x["recommended"], x["decision_score"]),
+        reverse=True,
+    )
 
 
 def serialize(m, **value_kwargs) -> dict:
@@ -163,7 +167,7 @@ def serialize(m, **value_kwargs) -> dict:
         "away_team": m.away_team,
         "favorite": favorite,
         "probabilities": {k: p[k] for k in ("home", "draw", "away")},
-        "best_value": vals[0] if vals else None,
+        "best_value": next((value for value in vals if value["recommended"]), None),
     }
 
 

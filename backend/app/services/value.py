@@ -11,6 +11,9 @@ MIN_EDGE = 0.02
 SOFT_ODD_PREMIUM = 1.08  # odd > 8% acima da mediana → value fofo
 MOVE_DROP_THRESHOLD = -0.03  # queda de 3%+ na odd
 SAMPLE_GAMES_SOFT = 5
+MIN_RECOMMENDED_PROBABILITY = 0.30
+MIN_RECOMMENDED_CONFIDENCE = 0.55
+MAX_RECOMMENDED_ODD = 4.50
 STAT_MARKETS = frozenset({"corners", "cards", "shots"})
 
 MARKET_KEYS = {
@@ -187,6 +190,13 @@ def evaluate(
         odds_falling=falling,
         h2h_over_boost=h2h_over_boost,
     )
+    recommended = bool(
+        is_value
+        and probability >= MIN_RECOMMENDED_PROBABILITY
+        and conf >= MIN_RECOMMENDED_CONFIDENCE
+        and odd <= MAX_RECOMMENDED_ODD
+    )
+    score = rank_score(ev, conf)
     return {
         "market": market,
         "selection": selection,
@@ -204,7 +214,10 @@ def evaluate(
         "suggested_stake_units": round(min(k * 10, 0.75), 2),
         "strength": classify(edge),
         "confidence": conf,
-        "rank_score": rank_score(ev, conf),
+        "recommended": recommended,
+        "risk_profile": "conservadora" if recommended else "especulativa",
+        "rank_score": score,
+        "decision_score": round(score * (0.5 + probability), 4),
         "consensus_odd": round(consensus_odd, 3) if consensus_odd else None,
         "odds_move_pct": round(odds_move_pct_value, 4) if odds_move_pct_value is not None else None,
         "books_covering": books_covering,

@@ -33,7 +33,15 @@ def test_evaluate_marks_value_when_above_thresholds():
     assert item["is_value"] is True
     assert item["expected_roi"] >= MIN_EV
     assert item["confidence"] > 0
+    assert item["recommended"] is True
     assert classify(0.12) == "muito forte"
+
+
+def test_low_probability_value_is_speculative_not_recommended():
+    item = evaluate("match_result", "draw", 5.0, 0.2342, "Demo")
+    assert item["is_value"] is True
+    assert item["recommended"] is False
+    assert item["risk_profile"] == "especulativa"
 
 
 def test_evaluate_rejects_soft_consensus():

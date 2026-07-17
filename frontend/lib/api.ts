@@ -29,6 +29,8 @@ export type Match = {
     odd: number;
     edge: number;
     strength: string;
+    recommended?: boolean;
+    risk_profile?: string;
   } | null;
 };
 
