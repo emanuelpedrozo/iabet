@@ -10,6 +10,12 @@ depends_on = None
 
 
 def upgrade():
+    # A revisão 0001 usa o metadata atual para inicializar bancos novos. Por isso,
+    # ela já pode ter criado esta tabela antes de a 0002 ser executada. Bancos
+    # existentes, criados antes do modelo, ainda precisam da criação incremental.
+    if sa.inspect(op.get_bind()).has_table("player_match_stats"):
+        return
+
     op.create_table(
         "player_match_stats",
         sa.Column("id", sa.Integer(), primary_key=True),
