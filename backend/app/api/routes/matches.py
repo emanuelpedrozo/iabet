@@ -275,6 +275,39 @@ async def historical_detail(
                 .order_by(Match.kickoff.desc())
             )
         ).all()
+        # Quando não há TeamStat, deriva apenas métricas coletivas que podem ser
+        # somadas com segurança a partir dos scouts individuais do Cartola.
+        derived_by_match = {
+            match_id: {
+                "total_shots": 0.0,
+                "shots_on_goal": 0.0,
+                "fouls": 0.0,
+                "yellow_cards": 0.0,
+            }
+            for match_id in recent_match_ids
+        }
+        for stat, _, match in player_rows:
+            metrics = stat.metrics or {}
+            derived = derived_by_match[match.id]
+            derived["total_shots"] += (
+                _number((metrics.get("shots") or {}).get("total")) or 0
+            )
+            derived["shots_on_goal"] += (
+                _number((metrics.get("shots") or {}).get("on")) or 0
+            )
+            derived["fouls"] += (
+                _number((metrics.get("fouls") or {}).get("committed")) or 0
+            )
+            derived["yellow_cards"] += (
+                _number((metrics.get("cards") or {}).get("yellow")) or 0
+            )
+        for key in derived_by_match[recent_match_ids[0]]:
+            if averages[key] is None:
+                averages[key] = round(
+                    sum(match_values[key] for match_values in derived_by_match.values())
+                    / len(derived_by_match),
+                    2,
+                )
         grouped: dict[int, dict] = {}
         for stat, player, _ in player_rows:
             entry = grouped.setdefault(
