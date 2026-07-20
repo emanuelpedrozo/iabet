@@ -23,11 +23,8 @@ async def main():
   if not admin:
    s.add(User(email=admin_email,password_hash=hash_password(settings.admin_password),role="admin"))
   else:
-   # O .env é a fonte de verdade do administrador de uso próprio. Isso também
-   # recupera o acesso quando a senha foi alterada depois do primeiro deploy.
-   # Se a pessoa acabou de se cadastrar com o e-mail administrativo, preserva
-   # a senha escolhida. Administradores já existentes continuam sincronizados.
-   if admin.role=="admin": admin.password_hash=hash_password(settings.admin_password)
+   # Deploys posteriores nunca devem trocar silenciosamente uma senha já
+   # cadastrada. ADMIN_PASSWORD é usado somente na criação inicial da conta.
    admin.role="admin"; admin.active=True
   comp=await s.scalar(select(Competition).where(Competition.name=="Brasileirão Série A",Competition.season=="2026"))
   if not comp: comp=Competition(name="Brasileirão Série A",country="Brasil",season="2026"); s.add(comp); await s.flush()
