@@ -1,11 +1,14 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from hashlib import sha256
+from secrets import token_urlsafe
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import admin
 from app.core.database import get_session
-from app.models.entities import JobLog, Match, PlayerMatchStat, Team, User
+from app.models.entities import Invitation, JobLog, Match, PlayerMatchStat, Team, User
 from app.models.ml_entities import MlModelRun
 from app.workers.tasks import (
     import_bzzoiro_ml_history,
@@ -27,6 +30,16 @@ from app.services.ml_shadow import MlShadowService
 router = APIRouter(prefix="/admin", tags=["Admin"], dependencies=[Depends(admin)])
 
 
+class UserAccessUpdate(BaseModel):
+    active: bool | None = None
+    role: str | None = None
+
+
+class InviteCreate(BaseModel):
+    role: str = "user"
+    expires_hours: int = 72
+
+
 def _map_sync_error(exc: Exception) -> HTTPException:
     msg = str(exc)
     if "não encontrada" in msg.lower():
@@ -44,6 +57,9 @@ async def overview(session: AsyncSession = Depends(get_session)):
     logs = list(await session.scalars(select(JobLog).order_by(JobLog.created_at.desc()).limit(20)))
     return {
         "users": await count(User),
+        "pending_users": await session.scalar(
+            select(func.count()).select_from(User).where(User.active.is_(False))
+        ),
         "teams": await count(Team),
         "matches": await count(Match),
         "player_match_stats": await count(PlayerMatchStat),
@@ -52,6 +68,67 @@ async def overview(session: AsyncSession = Depends(get_session)):
             for x in logs
         ],
     }
+
+
+@router.get("/users")
+async def list_users(session: AsyncSession = Depends(get_session)):
+    users = list(await session.scalars(select(User).order_by(User.created_at.desc())))
+    return [{
+        "id": user.id, "email": user.email, "role": user.role,
+        "active": user.active, "created_at": user.created_at,
+    } for user in users]
+
+
+@router.patch("/users/{user_id}")
+async def update_user_access(
+    user_id: int,
+    data: UserAccessUpdate,
+    actor: User = Depends(admin),
+    session: AsyncSession = Depends(get_session),
+):
+    user = await session.get(User, user_id)
+    if not user:
+        raise HTTPException(404, "Usuário não encontrado")
+    if user.id == actor.id and (data.active is False or data.role == "user"):
+        raise HTTPException(400, "Você não pode remover o próprio acesso administrativo")
+    if data.role is not None:
+        if data.role not in {"user", "admin"}:
+            raise HTTPException(400, "Perfil inválido")
+        user.role = data.role
+    if data.active is not None:
+        user.active = data.active
+    await session.commit()
+    return {"id": user.id, "email": user.email, "role": user.role, "active": user.active}
+
+
+@router.post("/invitations", status_code=201)
+async def create_invitation(data: InviteCreate, session: AsyncSession = Depends(get_session)):
+    if data.role not in {"user", "admin"}:
+        raise HTTPException(400, "Perfil inválido")
+    if not 1 <= data.expires_hours <= 720:
+        raise HTTPException(400, "Validade deve ficar entre 1 e 720 horas")
+    token = token_urlsafe(32)
+    invitation = Invitation(
+        token_hash=sha256(token.encode()).hexdigest(),
+        role=data.role,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=data.expires_hours),
+    )
+    session.add(invitation)
+    await session.commit()
+    return {"invite_code": token, "role": invitation.role, "expires_at": invitation.expires_at}
+
+
+@router.get("/invitations")
+async def list_invitations(session: AsyncSession = Depends(get_session)):
+    invitations = list(await session.scalars(
+        select(Invitation).order_by(Invitation.created_at.desc()).limit(20)
+    ))
+    now = datetime.now(timezone.utc)
+    return [{
+        "id": invitation.id, "role": invitation.role,
+        "expires_at": invitation.expires_at, "used_at": invitation.used_at,
+        "status": "used" if invitation.used_at else "expired" if invitation.expires_at <= now else "active",
+    } for invitation in invitations]
 
 
 @router.post("/refresh")

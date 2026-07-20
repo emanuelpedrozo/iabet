@@ -53,10 +53,10 @@ class MlShadowService:
 
     async def materialize(self) -> dict:
         model = await self.session.scalar(select(MlModelRun).where(
-            MlModelRun.status == "approved"
+            MlModelRun.status.in_(["approved", "rejected"])
         ).order_by(MlModelRun.created_at.desc()))
         if not model:
-            raise ValueError("Nenhum modelo aprovado para executar em modo sombra")
+            raise ValueError("Nenhum modelo treinado para executar em modo sombra")
 
         eligible_seasons = list(await self.session.scalars(select(MlSeason).where(
             MlSeason.quality_summary["eligible_for_training"].as_boolean().is_(True)
@@ -231,7 +231,7 @@ class MlShadowService:
 
     async def overview(self) -> dict:
         model = await self.session.scalar(select(MlModelRun).where(
-            MlModelRun.status == "approved"
+            MlModelRun.status.in_(["approved", "rejected"])
         ).order_by(MlModelRun.created_at.desc()))
         if not model:
             return {"active": False, "predictions": 0, "comparisons": []}
@@ -271,7 +271,8 @@ class MlShadowService:
             reverse=True,
         )
         return {
-            "active": True, "model": model.version, "round": next_round,
+            "active": True, "model": model.version, "model_status": model.status,
+            "round": next_round,
             "predictions": len(round_rows),
             "agreement_rate": round(sum(row.comparison.get("same_pick", False) for row in comparable)
                                     / len(comparable), 4) if comparable else None,

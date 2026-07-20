@@ -12,6 +12,7 @@ from app.models.entities import (
     Team,
     TeamStat,
     User,
+    Invitation,
 )
 from app.models.ml_entities import (
     MlMatch,
@@ -38,6 +39,7 @@ __all__ = [
     "Team",
     "TeamStat",
     "User",
+    "Invitation",
     "MlMatch",
     "MlModelRun",
     "MlPlayer",

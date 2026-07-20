@@ -6,10 +6,13 @@ import { apiFetch, clearToken, getToken } from '@/lib/api';
 
 type Overview = {
   users: number;
+  pending_users?: number;
   teams: number;
   matches: number;
   logs: { job: string; status: string; detail: unknown; created_at: string }[];
 };
+type ManagedUser = { id: number; email: string; role: 'user' | 'admin'; active: boolean; created_at: string };
+type Invitation = { id: number; role: string; status: 'active' | 'used' | 'expired'; expires_at: string; used_at?: string | null };
 
 type Provider = { name: string; healthy: boolean; error?: string };
 type MlQuality = {
@@ -39,6 +42,7 @@ type MlOverview = {
   shadow: {
     active: boolean;
     model?: string;
+    model_status?: string;
     round?: number | null;
     predictions: number;
     agreement_rate?: number | null;
@@ -88,6 +92,9 @@ type MlOverview = {
 export default function Admin() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [inviteLink, setInviteLink] = useState('');
   const [mlOverview, setMlOverview] = useState<MlOverview | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -104,10 +111,12 @@ export default function Admin() {
     }
     setLoading(true);
     setError('');
-    const [ov, pr, ml] = await Promise.all([
+    const [ov, pr, ml, us, inv] = await Promise.all([
       apiFetch('/admin/overview'),
       apiFetch('/admin/providers'),
       apiFetch('/admin/ml/overview'),
+      apiFetch('/admin/users'),
+      apiFetch('/admin/invitations'),
     ]);
     if (ov.status === 401 || pr.status === 401) {
       clearToken();
@@ -127,6 +136,8 @@ export default function Admin() {
     setOverview(await ov.json());
     if (pr.ok) setProviders(await pr.json());
     if (ml.ok) setMlOverview(await ml.json());
+    if (us.ok) setUsers(await us.json());
+    if (inv.ok) setInvitations(await inv.json());
     setLoading(false);
   }, []);
 
@@ -188,7 +199,7 @@ export default function Admin() {
     const result = await runAction('/admin/ml/train', 'Treinamento do modelo');
     if (result?.status === 'queued') {
       setMlMessage('Treinamento na fila. As métricas aparecerão abaixo quando terminar.');
-      [2500, 5000, 10000].forEach(delay => window.setTimeout(() => load(), delay));
+      [2500, 5000, 10000, 20000, 40000, 60000].forEach(delay => window.setTimeout(() => load(), delay));
     } else if (!result) {
       setMlMessage('Não foi possível iniciar o treinamento.');
     }
@@ -201,6 +212,35 @@ export default function Admin() {
       setMlMessage('ML sombra na fila. As comparações aparecerão abaixo.');
       [2500, 5000, 10000].forEach(delay => window.setTimeout(() => load(), delay));
     }
+  }
+
+  async function updateUser(user: ManagedUser, changes: Partial<Pick<ManagedUser, 'active' | 'role'>>) {
+    setActionBusy(true); setError(''); setMessage('');
+    try {
+      const response = await apiFetch(`/admin/users/${user.id}`, {
+        method: 'PATCH', body: JSON.stringify(changes),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) { setError(body.detail || 'Não foi possível alterar o acesso.'); return; }
+      setMessage(`Acesso de ${user.email} atualizado.`);
+      await load();
+    } finally { setActionBusy(false); }
+  }
+
+  async function createInvite() {
+    setActionBusy(true); setError(''); setInviteLink('');
+    try {
+      const response = await apiFetch('/admin/invitations', {
+        method: 'POST', body: JSON.stringify({ role: 'user', expires_hours: 72 }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) { setError(body.detail || 'Não foi possível criar o convite.'); return; }
+      const link = `${location.origin}/login?invite=${encodeURIComponent(body.invite_code)}`;
+      setInviteLink(link);
+      await navigator.clipboard?.writeText(link).catch(() => undefined);
+      setMessage('Convite criado e copiado. Ele vale por 72 horas e pode ser usado uma vez.');
+      await load();
+    } finally { setActionBusy(false); }
   }
 
   if (loading && !overview) {
@@ -232,6 +272,22 @@ export default function Admin() {
         <Stat icon={<Users aria-hidden />} label="Usuários" value={overview?.users ?? 0} />
         <Stat icon={<KeyRound aria-hidden />} label="Times" value={overview?.teams ?? 0} />
         <Stat icon={<ScrollText aria-hidden />} label="Partidas" value={overview?.matches ?? 0} />
+      </section>
+
+      <section className="card mt-8 overflow-hidden">
+        <div className="flex flex-col justify-between gap-4 border-b border-line p-5 md:flex-row md:items-end md:px-6">
+          <div><div className="label text-brand">Controle de acesso</div><h2 className="mt-1 text-xl font-bold">Usuários e convites</h2><p className="mt-1 text-sm text-muted">Cadastros sem convite aguardam sua aprovação.</p></div>
+          <Action disabled={actionBusy} label="Gerar convite de usuário" onClick={createInvite}/>
+        </div>
+        {inviteLink && <div className="border-b border-line bg-brand/[.04] p-4 md:px-6"><div className="text-xs text-muted">Link de uso único · válido por 72 horas</div><div className="mt-2 flex gap-2"><input readOnly value={inviteLink} className="min-w-0 flex-1 rounded-lg border border-line bg-black/20 px-3 py-2 text-xs text-white"/><button type="button" onClick={() => navigator.clipboard.writeText(inviteLink)} className="rounded-lg border border-line px-3 text-xs font-bold hover:text-brand">Copiar</button></div></div>}
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left text-sm">
+            <thead className="bg-black/15 text-xs uppercase tracking-wide text-muted"><tr><th className="px-5 py-3">Usuário</th><th className="px-3 py-3">Situação</th><th className="px-3 py-3">Perfil</th><th className="px-5 py-3 text-right">Ações</th></tr></thead>
+            <tbody>{users.map(user => <tr key={user.id} className="border-t border-line/70"><td className="px-5 py-3"><b className="block text-white">{user.email}</b><span className="text-xs text-muted">Cadastro {new Date(user.created_at).toLocaleDateString('pt-BR')}</span></td><td className="px-3 py-3"><span className={user.active ? 'text-brand' : 'text-amber-300'}>{user.active ? 'Liberado' : 'Pendente/bloqueado'}</span></td><td className="px-3 py-3"><span className={user.role === 'admin' ? 'text-brand' : 'text-muted'}>{user.role === 'admin' ? 'Administrador' : 'Usuário'}</span></td><td className="px-5 py-3"><div className="flex justify-end gap-2">{!user.active ? <SmallAction label="Aprovar" onClick={() => updateUser(user, { active: true })}/> : <SmallAction label="Bloquear" danger onClick={() => updateUser(user, { active: false })}/>}<SmallAction label={user.role === 'admin' ? 'Remover admin' : 'Tornar admin'} onClick={() => updateUser(user, { role: user.role === 'admin' ? 'user' : 'admin' })}/></div></td></tr>)}</tbody>
+          </table>
+          {!users.length && <p className="p-5 text-sm text-muted">Nenhum usuário encontrado.</p>}
+        </div>
+        {!!invitations.length && <div className="border-t border-line px-5 py-4 text-xs text-muted md:px-6"><b className="mr-3 text-white">Convites recentes</b>{invitations.slice(0,6).map(invitation => <span key={invitation.id} className="mr-3 inline-block">#{invitation.id} · {invitation.status === 'active' ? 'ativo' : invitation.status === 'used' ? 'utilizado' : 'expirado'}</span>)}</div>}
       </section>
 
       <section className="mt-8" aria-busy={actionBusy}>
@@ -283,7 +339,7 @@ export default function Admin() {
             onClick={runMlImport}/>
           <Action disabled={actionBusy || (mlOverview?.seasons || []).filter(s => s.quality?.eligible_for_training).length < 2}
             label="Treinar modelo de resultados" onClick={runMlTraining}/>
-          <Action disabled={actionBusy || !mlOverview?.model_runs?.some(run => run.status === 'approved')}
+          <Action disabled={actionBusy || !mlOverview?.model_runs?.length}
             label="Atualizar ML sombra" onClick={runShadow}/>
           {mlMessage && (
             <p role="status" className="w-full text-sm text-brand">{mlMessage}</p>
@@ -306,7 +362,7 @@ export default function Admin() {
             <b>Modo sombra · {mlOverview?.shadow?.round ? `rodada ${mlOverview.shadow.round}` : 'próxima rodada'}</b>
             <span className={mlOverview?.shadow?.active ? 'text-brand' : 'text-amber-300'}>
               {mlOverview?.shadow?.active
-                ? 'ativo, sem afetar recomendações'
+                ? `${mlOverview.shadow.model_status === 'approved' ? 'modelo aprovado' : 'modelo experimental'}, sem afetar recomendações`
                 : 'aguardando a primeira execução'}
             </span>
           </div>
@@ -538,4 +594,11 @@ function Action({
       {label}
     </button>
   );
+}
+
+function SmallAction({ label, onClick, danger = false }: { label: string; onClick: () => void; danger?: boolean }) {
+  return <button type="button" onClick={onClick}
+    className={`rounded-lg border px-2.5 py-1.5 text-xs transition ${danger ? 'border-red-400/20 text-red-300 hover:border-red-400/50' : 'border-line text-muted hover:border-brand/40 hover:text-white'}`}>
+    {label}
+  </button>;
 }
