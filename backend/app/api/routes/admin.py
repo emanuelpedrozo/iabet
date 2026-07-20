@@ -1,10 +1,19 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import admin
 from app.core.database import get_session
 from app.models.entities import JobLog, Match, PlayerMatchStat, Team, User
-from app.workers.tasks import refresh_all
+from app.models.ml_entities import MlModelRun
+from app.workers.tasks import (
+    import_bzzoiro_ml_history,
+    import_football_data_ml_history,
+    materialize_ml_shadow,
+    refresh_all,
+    train_ml_result_baseline,
+)
 from app.providers.api_futebol import ApiFutebolProvider
 from app.providers.football_data import FootballDataProvider
 from app.providers.odds_api import OddsApiProvider
@@ -12,6 +21,8 @@ from app.providers.api_sports import ApiSportsProvider
 from app.providers.cartola import CartolaProvider
 from app.providers.bzzoiro import BzzoiroProvider
 from app.services.sync import DataSyncService
+from app.services.ml_history import MlHistoryService
+from app.services.ml_shadow import MlShadowService
 
 router = APIRouter(prefix="/admin", tags=["Admin"], dependencies=[Depends(admin)])
 
@@ -121,6 +132,75 @@ async def sync_bzzoiro_today(session: AsyncSession = Depends(get_session)):
         return await DataSyncService(session).sync_bzzoiro_today()
     except (ValueError, RuntimeError) as exc:
         raise _map_sync_error(exc) from exc
+
+
+@router.post("/ml/import-bzzoiro")
+async def import_ml_history(
+    year: int,
+    include_details: bool = False,
+    session: AsyncSession = Depends(get_session),
+):
+    if year < 2001 or year > datetime.now().year:
+        raise HTTPException(400, "Temporada fora do intervalo disponível (2001 até o ano atual)")
+    task = import_bzzoiro_ml_history.delay(year, include_details)
+    session.add(JobLog(
+        job=f"import_bzzoiro_ml_history_{year}",
+        status="queued",
+        detail={"task_id": task.id, "include_details": include_details},
+    ))
+    await session.commit()
+    return {"task_id": task.id, "status": "queued", "year": year,
+            "include_details": include_details}
+
+
+@router.get("/ml/overview")
+async def ml_overview(session: AsyncSession = Depends(get_session)):
+    result = await MlHistoryService(session).overview()
+    runs = list(await session.scalars(
+        select(MlModelRun).order_by(MlModelRun.created_at.desc()).limit(5)
+    ))
+    result["model_runs"] = [{
+        "version": run.version, "algorithm": run.algorithm,
+        "status": run.status,
+        "train_seasons": run.train_seasons, "test_season": run.test_season,
+        "train_samples": run.train_samples, "test_samples": run.test_samples,
+        "metrics": run.metrics, "created_at": run.created_at,
+    } for run in runs]
+    result["shadow"] = await MlShadowService(session).overview()
+    return result
+
+
+@router.post("/ml/import-football-data")
+async def import_ml_football_data(year: int, session: AsyncSession = Depends(get_session)):
+    if year < 2001 or year > datetime.now().year:
+        raise HTTPException(400, "Temporada fora do intervalo disponível")
+    task = import_football_data_ml_history.delay(year)
+    session.add(JobLog(
+        job=f"import_football_data_ml_history_{year}", status="queued",
+        detail={"task_id": task.id},
+    ))
+    await session.commit()
+    return {"task_id": task.id, "status": "queued", "year": year}
+
+
+@router.post("/ml/train")
+async def train_ml(session: AsyncSession = Depends(get_session)):
+    task = train_ml_result_baseline.delay()
+    session.add(JobLog(
+        job="train_ml_result_baseline", status="queued", detail={"task_id": task.id}
+    ))
+    await session.commit()
+    return {"task_id": task.id, "status": "queued"}
+
+
+@router.post("/ml/shadow/materialize")
+async def materialize_shadow(session: AsyncSession = Depends(get_session)):
+    task = materialize_ml_shadow.delay()
+    session.add(JobLog(
+        job="materialize_ml_shadow", status="queued", detail={"task_id": task.id}
+    ))
+    await session.commit()
+    return {"task_id": task.id, "status": "queued"}
 
 
 @router.post("/sync/cartola-recent")

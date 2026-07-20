@@ -2,6 +2,7 @@ export const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api
 const SERVER_API = process.env.API_INTERNAL_URL || API;
 
 export const TOKEN_KEY = 'iabet_token';
+export const TOKEN_ROLE_KEY = 'iabet_role';
 
 export type Team = {
   id: number;
@@ -15,6 +16,7 @@ export type Team = {
 
 export type Match = {
   id: number;
+  round_number?: number | null;
   kickoff: string;
   venue?: string;
   status: string;
@@ -41,6 +43,14 @@ export type Match = {
     recommended?: boolean;
     risk_profile?: string;
   } | null;
+};
+
+export type RoundMatches = {
+  round: number;
+  competition_id: number;
+  competition: string;
+  season: string;
+  matches: Match[];
 };
 
 export type StandingRow = {
@@ -70,8 +80,23 @@ export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
-export function setToken(token: string) {
+export function getTokenRole(): string | null {
+  if (typeof window === 'undefined') return null;
+  const stored = localStorage.getItem(TOKEN_ROLE_KEY);
+  if (stored) return stored;
+  const token = getToken();
+  if (!token) return null;
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return typeof payload.role === 'string' ? payload.role : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setToken(token: string, role?: string) {
   localStorage.setItem(TOKEN_KEY, token);
+  if (role) localStorage.setItem(TOKEN_ROLE_KEY, role);
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event('iabet-auth'));
   }
@@ -79,6 +104,7 @@ export function setToken(token: string) {
 
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(TOKEN_ROLE_KEY);
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event('iabet-auth'));
   }
@@ -104,6 +130,12 @@ export async function getMatches(): Promise<Match[]> {
 export async function getStandings(): Promise<Standings> {
   const r = await fetch(`${SERVER_API}/matches/standings`, { cache: 'no-store' });
   if (!r.ok) throw new Error('Classificação indisponível');
+  return r.json();
+}
+
+export async function getNextRound(): Promise<RoundMatches> {
+  const r = await fetch(`${SERVER_API}/matches/rounds/next`, { cache: 'no-store' });
+  if (!r.ok) throw new Error('Próxima rodada indisponível');
   return r.json();
 }
 

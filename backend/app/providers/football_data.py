@@ -17,6 +17,8 @@ class FootballDataProvider:
         if date_from: params["dateFrom"]=date_from.date().isoformat()
         if date_to: params["dateTo"]=date_to.date().isoformat()
         return (await self._get("/competitions/BSA/matches",params)).json().get("matches",[])
+    async def season_matches(self, season: int)->dict:
+        return (await self._get("/competitions/BSA/matches", {"season": season})).json()
     async def standings(self)->dict: return (await self._get("/competitions/BSA/standings")).json()
     async def usage(self)->dict:
         response=await self._get("/competitions/BSA")

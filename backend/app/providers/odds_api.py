@@ -3,9 +3,11 @@ from app.core.config import settings
 from app.providers.base import OddsProvider
 
 SPORT = "soccer_brazil_campeonato"
-FEATURED_MARKETS = "h2h,totals,btts"
-# Escanteios/cartões só no endpoint por evento (não vêm no /odds em lote).
-EVENT_STAT_MARKETS = "alternate_totals_corners,alternate_totals_cards"
+# O endpoint em lote aceita apenas mercados principais. BTTS retorna
+# INVALID_MARKET/422 nele, embora seja aceito no endpoint individual do evento.
+FEATURED_MARKETS = "h2h,totals"
+# BTTS, escanteios e cartões são consultados por evento (cota limitada).
+EVENT_STAT_MARKETS = "btts,alternate_totals_corners,alternate_totals_cards"
 
 
 class OddsApiProvider(OddsProvider):

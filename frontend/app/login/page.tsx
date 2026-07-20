@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { API, getToken, setToken } from '@/lib/api';
 
 export default function Login() {
+  const [mode, setMode] = useState<'login' | 'register'>('login');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -19,20 +20,30 @@ export default function Login() {
     setSubmitting(true);
     try {
       const f = new FormData(e.currentTarget);
-      const r = await fetch(`${API}/auth/login`, {
+      const password = String(f.get('password') || '');
+      const confirmation = String(f.get('password_confirmation') || '');
+      if (mode === 'register' && password !== confirmation) {
+        setError('As senhas não coincidem');
+        return;
+      }
+      const r = await fetch(`${API}/auth/${mode === 'register' ? 'register' : 'login'}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: f.get('email'), password: f.get('password') }),
+        body: JSON.stringify({ email: f.get('email'), password }),
       });
       if (!r.ok) {
         setError(
-          r.status === 429 ? 'Muitas tentativas. Aguarde um minuto.' : 'Credenciais inválidas',
+          r.status === 429 ? 'Muitas tentativas. Aguarde um minuto.'
+            : r.status === 409 ? 'Este e-mail já está cadastrado'
+            : mode === 'register' ? 'Não foi possível criar a conta' : 'Credenciais inválidas',
         );
         return;
       }
       const d = await r.json();
-      setToken(d.access_token);
+      setToken(d.access_token, d.role);
       location.href = d.role === 'admin' ? '/admin' : '/';
+    } catch {
+      setError('Não foi possível conectar à API. Tente novamente em alguns instantes.');
     } finally {
       setSubmitting(false);
     }
@@ -42,7 +53,7 @@ export default function Login() {
     <main className="mx-auto max-w-md px-5 py-20">
       <form onSubmit={submit} className="card p-8" aria-busy={submitting}>
         <div className="label text-brand">Área segura</div>
-        <h1 className="mt-2 text-3xl font-black">Entrar no IABet</h1>
+        <h1 className="mt-2 text-3xl font-black">{mode === 'login' ? 'Entrar no IABet' : 'Criar sua conta'}</h1>
         <label className="mt-7 block text-sm text-muted">
           E-mail
           <input
@@ -61,13 +72,20 @@ export default function Login() {
           <input
             name="password"
             type="password"
-            autoComplete="current-password"
+            autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+            minLength={8}
             required
             disabled={submitting}
             aria-invalid={Boolean(error)}
             className="mt-2 w-full rounded-xl border border-line bg-ink p-3 text-white"
           />
         </label>
+        {mode === 'register' && <label className="mt-4 block text-sm text-muted">
+          Confirmar senha
+          <input name="password_confirmation" type="password" autoComplete="new-password"
+            minLength={8} required disabled={submitting}
+            className="mt-2 w-full rounded-xl border border-line bg-ink p-3 text-white"/>
+        </label>}
         {error && (
           <p id="login-error" role="alert" className="mt-3 text-sm text-red-400">
             {error}
@@ -78,7 +96,12 @@ export default function Login() {
           disabled={submitting}
           className="mt-6 w-full rounded-xl bg-brand p-3 font-bold text-ink disabled:opacity-60"
         >
-          {submitting ? 'Entrando…' : 'Entrar'}
+          {submitting ? (mode === 'login' ? 'Entrando…' : 'Criando…') : (mode === 'login' ? 'Entrar' : 'Cadastrar')}
+        </button>
+        <button type="button" disabled={submitting}
+          onClick={() => { setError(''); setMode(mode === 'login' ? 'register' : 'login'); }}
+          className="mt-4 w-full text-sm text-muted transition hover:text-brand">
+          {mode === 'login' ? 'Ainda não tenho conta' : 'Já tenho uma conta'}
         </button>
       </form>
     </main>

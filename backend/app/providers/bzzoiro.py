@@ -44,6 +44,18 @@ class BzzoiroProvider:
         )
         return data if isinstance(data, list) else data.get("results") or data.get("data") or []
 
+    async def league_seasons(self, league_id: int) -> list[dict]:
+        data = await self._get(f"/api/v2/leagues/{league_id}/seasons/")
+        return data if isinstance(data, list) else data.get("seasons") or []
+
+    async def season_events(
+        self, season_id: int, *, limit: int = 200, offset: int = 0, status: str = "finished"
+    ) -> dict:
+        return await self._get(
+            "/api/v2/events/",
+            {"season_id": season_id, "status": status, "limit": limit, "offset": offset},
+        )
+
     async def lineups(self, event_id: int) -> dict:
         return await self._get(f"/api/v2/events/{event_id}/lineups/")
 

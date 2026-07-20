@@ -12,14 +12,90 @@ type Overview = {
 };
 
 type Provider = { name: string; healthy: boolean; error?: string };
+type MlQuality = {
+  matches?: number;
+  usable_matches?: number;
+  valid_matches?: number;
+  review_matches?: number;
+  excluded_matches?: number;
+  teams?: number;
+  eligible_for_training?: boolean;
+};
+type MlOverview = {
+  seasons: { year: number; source: string; status: string; quality: MlQuality }[];
+  matches: number;
+  team_stats: number;
+  player_stats: number;
+  model_runs: {
+    version: string;
+    status: string;
+    train_seasons: number[];
+    test_season: number;
+    train_samples: number;
+    test_samples: number;
+    metrics: { accuracy?: number; log_loss?: number; brier?: number; majority_baseline_accuracy?: number; baseline_log_loss?: number; baseline_brier?: number };
+    created_at: string;
+  }[];
+  shadow: {
+    active: boolean;
+    model?: string;
+    round?: number | null;
+    predictions: number;
+    agreement_rate?: number | null;
+    comparisons: {
+      match_id: number;
+      home_team: string;
+      away_team: string;
+      kickoff: string;
+      status?: string;
+      home_score?: number | null;
+      away_score?: number | null;
+      probabilities: Record<'home' | 'draw' | 'away', number>;
+      comparison: {
+        active_probabilities: Record<'home' | 'draw' | 'away', number>;
+        active_pick: 'home' | 'draw' | 'away';
+        shadow_pick: 'home' | 'draw' | 'away';
+        same_pick: boolean;
+        max_probability_delta: number;
+      };
+    }[];
+    backtest?: {
+      games: number;
+      shadow_accuracy: number | null;
+      active_accuracy: number | null;
+      shadow_log_loss: number | null;
+      active_log_loss: number | null;
+      matches: {
+        match_id: number;
+        home_team: string;
+        away_team: string;
+        home_score: number;
+        away_score: number;
+        kickoff: string;
+        probabilities: Record<'home' | 'draw' | 'away', number>;
+        comparison: {
+          outcome: 'home' | 'draw' | 'away';
+          active_pick: 'home' | 'draw' | 'away';
+          shadow_pick: 'home' | 'draw' | 'away';
+          active_correct: boolean;
+          shadow_correct: boolean;
+        };
+      }[];
+    };
+  };
+};
 
 export default function Admin() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
+  const [mlOverview, setMlOverview] = useState<MlOverview | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionBusy, setActionBusy] = useState(false);
+  const [mlYear, setMlYear] = useState(2025);
+  const [mlDetails, setMlDetails] = useState(false);
+  const [mlMessage, setMlMessage] = useState('');
 
   const load = useCallback(async () => {
     if (!getToken()) {
@@ -28,13 +104,19 @@ export default function Admin() {
     }
     setLoading(true);
     setError('');
-    const [ov, pr] = await Promise.all([
+    const [ov, pr, ml] = await Promise.all([
       apiFetch('/admin/overview'),
       apiFetch('/admin/providers'),
+      apiFetch('/admin/ml/overview'),
     ]);
-    if (ov.status === 401 || ov.status === 403 || pr.status === 401 || pr.status === 403) {
+    if (ov.status === 401 || pr.status === 401) {
       clearToken();
       location.href = '/login';
+      return;
+    }
+    if (ov.status === 403 || pr.status === 403) {
+      setError('Sua conta está autenticada, mas não possui permissão de administrador.');
+      setLoading(false);
       return;
     }
     if (!ov.ok) {
@@ -44,6 +126,7 @@ export default function Admin() {
     }
     setOverview(await ov.json());
     if (pr.ok) setProviders(await pr.json());
+    if (ml.ok) setMlOverview(await ml.json());
     setLoading(false);
   }, []);
 
@@ -57,9 +140,13 @@ export default function Admin() {
     setActionBusy(true);
     try {
       const r = await apiFetch(path, { method: 'POST' });
-      if (r.status === 401 || r.status === 403) {
+      if (r.status === 401) {
         clearToken();
         location.href = '/login';
+        return;
+      }
+      if (r.status === 403) {
+        setError('Sua conta não possui permissão para executar esta ação.');
         return;
       }
       const body = await r.json().catch(() => ({}));
@@ -67,10 +154,52 @@ export default function Admin() {
         setError(typeof body.detail === 'string' ? body.detail : `Falha em ${label}`);
         return;
       }
-      setMessage(`${label} concluído.`);
+      setMessage(body.status === 'queued'
+        ? `${label} enviado para a fila.`
+        : `${label} concluído.`);
       await load();
+      return body;
+    } catch {
+      setError(`Não foi possível executar ${label}.`);
+      return null;
     } finally {
       setActionBusy(false);
+    }
+  }
+
+  async function runMlImport() {
+    setMlMessage('Enviando importação…');
+    const result = await runAction(
+      `/admin/ml/import-bzzoiro?year=${mlYear}&include_details=${mlDetails}`,
+      `Histórico ML ${mlYear}`,
+    );
+    if (result?.status === 'queued') {
+      setMlMessage('Importação na fila. O resultado aparecerá em “Últimos jobs”.');
+      [2500, 5000, 10000].forEach(delay => window.setTimeout(() => load(), delay));
+    } else if (result) {
+      setMlMessage('Importação concluída.');
+    } else {
+      setMlMessage('A importação não pôde ser iniciada. Veja a mensagem de erro acima.');
+    }
+  }
+
+  async function runMlTraining() {
+    setMlMessage('Enviando treinamento…');
+    const result = await runAction('/admin/ml/train', 'Treinamento do modelo');
+    if (result?.status === 'queued') {
+      setMlMessage('Treinamento na fila. As métricas aparecerão abaixo quando terminar.');
+      [2500, 5000, 10000].forEach(delay => window.setTimeout(() => load(), delay));
+    } else if (!result) {
+      setMlMessage('Não foi possível iniciar o treinamento.');
+    }
+  }
+
+  async function runShadow() {
+    setMlMessage('Atualizando previsões em modo sombra…');
+    const result = await runAction('/admin/ml/shadow/materialize', 'ML sombra');
+    if (result?.status === 'queued') {
+      setMlMessage('ML sombra na fila. As comparações aparecerão abaixo.');
+      [2500, 5000, 10000].forEach(delay => window.setTimeout(() => load(), delay));
     }
   }
 
@@ -139,6 +268,192 @@ export default function Admin() {
             label="Importar Bzzoiro"
           />
         </div>
+        <div className="mt-5 flex flex-wrap items-end gap-3 rounded-2xl border border-line bg-white/[.02] p-4">
+          <label className="text-xs text-muted">Temporada Série A
+            <input type="number" min="2001" max={new Date().getFullYear()} value={mlYear}
+              onChange={event => setMlYear(Number(event.target.value))}
+              className="mt-1 block w-28 rounded-lg border border-line bg-black/20 px-3 py-2 text-sm text-white"/>
+          </label>
+          <label className="mb-2 flex items-center gap-2 text-xs text-muted">
+            <input type="checkbox" checked={mlDetails}
+              onChange={event => setMlDetails(event.target.checked)}/>
+            Incluir estatísticas e jogadores (mais demorado)
+          </label>
+          <Action disabled={actionBusy} label="Importar histórico para ML"
+            onClick={runMlImport}/>
+          <Action disabled={actionBusy || (mlOverview?.seasons || []).filter(s => s.quality?.eligible_for_training).length < 2}
+            label="Treinar modelo de resultados" onClick={runMlTraining}/>
+          <Action disabled={actionBusy || !mlOverview?.model_runs?.some(run => run.status === 'approved')}
+            label="Atualizar ML sombra" onClick={runShadow}/>
+          {mlMessage && (
+            <p role="status" className="w-full text-sm text-brand">{mlMessage}</p>
+          )}
+        </div>
+      </section>
+
+      <section className="mt-8 card p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="label text-brand">Base histórica de ML</div>
+            <h2 className="mt-1 text-xl font-bold">Qualidade para treinamento</h2>
+          </div>
+          <div className="text-sm text-muted">
+            {mlOverview?.matches ?? 0} registros brutos · {mlOverview?.team_stats ?? 0} scouts de time · {mlOverview?.player_stats ?? 0} scouts de jogador
+          </div>
+        </div>
+        <div className="mt-5 rounded-xl border border-brand/30 bg-brand/[.04] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <b>Modo sombra · {mlOverview?.shadow?.round ? `rodada ${mlOverview.shadow.round}` : 'próxima rodada'}</b>
+            <span className={mlOverview?.shadow?.active ? 'text-brand' : 'text-amber-300'}>
+              {mlOverview?.shadow?.active
+                ? 'ativo, sem afetar recomendações'
+                : 'aguardando a primeira execução'}
+            </span>
+          </div>
+          <p className="mt-2 text-sm text-muted">
+            {mlOverview?.shadow?.predictions ?? 0} jogos da rodada comparados
+            {mlOverview?.shadow?.agreement_rate != null
+              ? ` · concordância com o modelo atual: ${(mlOverview.shadow.agreement_rate * 100).toFixed(1)}%`
+              : ' · aguardando comparações'}
+          </p>
+          <p className="mt-1 text-xs text-muted">
+            Comparação do mercado 1X2 somente para todos os jogos da próxima rodada. Partidas de rodadas posteriores não entram nesta tabela.
+          </p>
+          {!!mlOverview?.shadow?.comparisons?.length && (
+            <div className="mt-4 overflow-x-auto rounded-xl border border-line">
+              <table className="w-full min-w-[760px] text-left text-sm">
+                <thead className="bg-black/20 text-xs uppercase tracking-wide text-muted">
+                  <tr>
+                    <th className="px-3 py-3">Jogo</th>
+                    <th className="px-3 py-3">Modelo atual</th>
+                    <th className="px-3 py-3">ML sombra</th>
+                    <th className="px-3 py-3">Diferença</th>
+                    <th className="px-3 py-3">Leitura</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mlOverview.shadow.comparisons.slice(0, 10).map(row => {
+                    const labels = { home: row.home_team, draw: 'Empate', away: row.away_team };
+                    const activePick = row.comparison.active_pick;
+                    const shadowPick = row.comparison.shadow_pick;
+                    return (
+                      <tr key={row.match_id} className="border-t border-line/70">
+                        <td className="px-3 py-3">
+                          <b className="block text-white">{row.home_team} × {row.away_team}</b>
+                          <span className="text-xs text-muted">{new Date(row.kickoff).toLocaleString('pt-BR')}</span>
+                          {row.status === 'finished' && (
+                            <span className="ml-2 rounded bg-brand/10 px-1.5 py-0.5 text-[10px] text-brand">
+                              Final: {row.home_score}–{row.away_score}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-3">
+                          <b className="block text-white">{labels[activePick]}</b>
+                          <span className="text-muted">{((row.comparison.active_probabilities[activePick] || 0) * 100).toFixed(1)}%</span>
+                        </td>
+                        <td className="px-3 py-3">
+                          <b className="block text-white">{labels[shadowPick]}</b>
+                          <span className="text-muted">{((row.probabilities[shadowPick] || 0) * 100).toFixed(1)}%</span>
+                        </td>
+                        <td className="px-3 py-3 font-bold text-amber-300">
+                          {((row.comparison.max_probability_delta || 0) * 100).toFixed(1)} p.p.
+                        </td>
+                        <td className={row.comparison.same_pick ? 'px-3 py-3 text-brand' : 'px-3 py-3 text-amber-300'}>
+                          {row.comparison.same_pick ? 'Concordam' : 'Divergem'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {!!mlOverview?.shadow?.backtest?.games && (
+            <div className="mt-5 border-t border-line pt-5">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <div className="label text-brand">Últimos 7 dias</div>
+                  <h3 className="mt-1 font-bold text-white">Backtest com resultados reais</h3>
+                </div>
+                <span className="text-xs text-muted">Sem usar dados posteriores a cada partida</span>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <span className="rounded-lg bg-black/15 p-3 text-sm text-muted"><b className="block text-xl text-white">{mlOverview.shadow.backtest.games}</b>jogos</span>
+                <span className="rounded-lg bg-black/15 p-3 text-sm text-muted"><b className="block text-xl text-white">{((mlOverview.shadow.backtest.active_accuracy || 0) * 100).toFixed(1)}%</b>acerto atual</span>
+                <span className="rounded-lg bg-black/15 p-3 text-sm text-muted"><b className="block text-xl text-white">{((mlOverview.shadow.backtest.shadow_accuracy || 0) * 100).toFixed(1)}%</b>acerto ML</span>
+                <span className="rounded-lg bg-black/15 p-3 text-sm text-muted"><b className="block text-xl text-white">{(mlOverview.shadow.backtest.shadow_log_loss || 0).toFixed(3)}</b>log loss ML</span>
+              </div>
+              <div className="mt-4 overflow-x-auto rounded-xl border border-line">
+                <table className="w-full min-w-[720px] text-left text-sm">
+                  <thead className="bg-black/20 text-xs uppercase tracking-wide text-muted">
+                    <tr><th className="px-3 py-3">Jogo</th><th className="px-3 py-3">Placar</th><th className="px-3 py-3">Modelo atual</th><th className="px-3 py-3">ML sombra</th></tr>
+                  </thead>
+                  <tbody>
+                    {mlOverview.shadow.backtest.matches.map(row => {
+                      const labels = { home: row.home_team, draw: 'Empate', away: row.away_team };
+                      return (
+                        <tr key={row.match_id} className="border-t border-line/70">
+                          <td className="px-3 py-3"><b className="block text-white">{row.home_team} × {row.away_team}</b><span className="text-xs text-muted">{new Date(row.kickoff).toLocaleString('pt-BR')}</span></td>
+                          <td className="px-3 py-3"><b className="text-white">{row.home_score}–{row.away_score}</b><span className="ml-2 text-xs text-muted">{labels[row.comparison.outcome]}</span></td>
+                          <td className={row.comparison.active_correct ? 'px-3 py-3 text-brand' : 'px-3 py-3 text-red-400'}>{labels[row.comparison.active_pick]} · {row.comparison.active_correct ? 'acertou' : 'errou'}</td>
+                          <td className={row.comparison.shadow_correct ? 'px-3 py-3 text-brand' : 'px-3 py-3 text-red-400'}>{labels[row.comparison.shadow_pick]} · {row.comparison.shadow_correct ? 'acertou' : 'errou'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="mt-5 grid gap-3 md:grid-cols-2">
+          {(mlOverview?.seasons || []).map(season => {
+            const quality = season.quality || {};
+            return (
+              <div key={`${season.source}-${season.year}`} className="rounded-xl border border-line bg-black/10 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <b>Brasileirão {season.year} <small className="ml-1 font-normal text-muted">{season.source}</small></b>
+                  <span className={quality.eligible_for_training ? 'text-brand' : 'text-amber-300'}>
+                    {quality.eligible_for_training ? 'pronto para treinar' : 'requer revisão'}
+                  </span>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-sm text-muted sm:grid-cols-4">
+                  <span><b className="block text-white">{quality.valid_matches ?? 0}</b>válidas</span>
+                  <span><b className="block text-white">{quality.excluded_matches ?? 0}</b>excluídas</span>
+                  <span><b className="block text-white">{quality.review_matches ?? 0}</b>em revisão</span>
+                  <span><b className="block text-white">{quality.teams ?? 0}</b>clubes</span>
+                </div>
+              </div>
+            );
+          })}
+          {!mlOverview?.seasons?.length && <p className="text-sm text-muted">Nenhuma temporada importada.</p>}
+        </div>
+        {mlOverview?.model_runs?.[0] && (() => {
+          const run = mlOverview.model_runs[0];
+          return (
+            <div className="mt-5 rounded-xl border border-brand/30 bg-brand/[.04] p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <b>Modelo mais recente</b>
+                <span className={run.status === 'approved' ? 'text-xs text-brand' : 'text-xs text-amber-300'}>
+                  {run.status === 'approved' ? 'aprovado para integração' : 'experimental — não ativo'}
+                </span>
+              </div>
+              <div className="mt-1 text-xs text-muted">{run.version}</div>
+              <p className="mt-2 text-sm text-muted">
+                Treino: {run.train_seasons.join(', ')} ({run.train_samples} jogos) · Teste temporal: {run.test_season} ({run.test_samples} jogos)
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                <span><b className="block text-xl text-white">{((run.metrics.accuracy || 0) * 100).toFixed(1)}%</b>acurácia</span>
+                <span><b className="block text-xl text-white">{(run.metrics.log_loss || 0).toFixed(3)}</b>log loss</span>
+                <span><b className="block text-xl text-white">{(run.metrics.brier || 0).toFixed(3)}</b>Brier</span>
+                <span><b className="block text-xl text-white">{((run.metrics.majority_baseline_accuracy || 0) * 100).toFixed(1)}%</b>baseline simples</span>
+              </div>
+              <p className="mt-3 text-xs text-muted">
+                Baseline probabilística: log loss {(run.metrics.baseline_log_loss || 0).toFixed(3)} · Brier {(run.metrics.baseline_brier || 0).toFixed(3)}
+              </p>
+            </div>
+          );
+        })()}
       </section>
 
       <section className="mt-10 grid gap-6 lg:grid-cols-2">
@@ -169,8 +484,8 @@ export default function Admin() {
               <li key={`${log.job}-${log.created_at}-${i}`} className="border-b border-line/50 pb-2">
                 <div className="flex justify-between gap-2">
                   <b>{log.job}</b>
-                  <span className={log.status === 'success' ? 'text-brand' : 'text-red-400'}>
-                    {log.status}
+                  <span className={log.status === 'success' ? 'text-brand' : log.status === 'queued' ? 'text-amber-300' : 'text-red-400'}>
+                    {log.status === 'success' ? 'concluído' : log.status === 'queued' ? 'na fila' : 'falhou'}
                   </span>
                 </div>
                 <div className="mt-1 text-xs text-muted">

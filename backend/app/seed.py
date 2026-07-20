@@ -18,7 +18,17 @@ FIXTURES=[
 
 async def main():
  async with SessionLocal() as s:
-  if not await s.scalar(select(User).where(User.email==settings.admin_email)): s.add(User(email=settings.admin_email,password_hash=hash_password(settings.admin_password),role="admin"))
+  admin_email=settings.admin_email.lower().strip()
+  admin=await s.scalar(select(User).where(User.email==admin_email))
+  if not admin:
+   s.add(User(email=admin_email,password_hash=hash_password(settings.admin_password),role="admin"))
+  else:
+   # O .env é a fonte de verdade do administrador de uso próprio. Isso também
+   # recupera o acesso quando a senha foi alterada depois do primeiro deploy.
+   # Se a pessoa acabou de se cadastrar com o e-mail administrativo, preserva
+   # a senha escolhida. Administradores já existentes continuam sincronizados.
+   if admin.role=="admin": admin.password_hash=hash_password(settings.admin_password)
+   admin.role="admin"; admin.active=True
   comp=await s.scalar(select(Competition).where(Competition.name=="Brasileirão Série A",Competition.season=="2026"))
   if not comp: comp=Competition(name="Brasileirão Série A",country="Brasil",season="2026"); s.add(comp); await s.flush()
   dbteams={}
@@ -35,4 +45,3 @@ async def main():
     for selection,price in prices.items(): s.add(Odd(match_id=m.id,bookmaker="Mercado agregado",market="match_result",selection=selection,price=price,captured_at=now))
   await s.commit()
 if __name__=="__main__": asyncio.run(main())
-

@@ -142,6 +142,7 @@ def serialize(m, **value_kwargs) -> dict:
     if not p:
         return {
             "id": m.id,
+            "round_number": match_round_number(m),
             "kickoff": m.kickoff,
             "venue": m.venue,
             "status": m.status.value,
@@ -181,6 +182,7 @@ def serialize(m, **value_kwargs) -> dict:
     }
     return {
         "id": m.id,
+        "round_number": match_round_number(m),
         "kickoff": m.kickoff,
         "venue": m.venue,
         "status": m.status.value,
@@ -192,6 +194,25 @@ def serialize(m, **value_kwargs) -> dict:
         "best_value": next((value for value in vals if value["recommended"]), None),
         "model_pick": model_pick,
     }
+
+
+def match_round_number(match: Match) -> int | None:
+    """Normaliza o número da rodada informado pelos diferentes provedores."""
+    metadata = match.metadata_ or {}
+    candidates = [
+        metadata.get("matchday"),
+        metadata.get("round"),
+        (metadata.get("league") or {}).get("round"),
+        (metadata.get("fixture") or {}).get("round"),
+    ]
+    for value in candidates:
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            digits = "".join(char if char.isdigit() else " " for char in value).split()
+            if digits:
+                return int(digits[-1])
+    return None
 
 
 async def fetch_h2h(session: AsyncSession, home_id: int, away_id: int, limit: int = 10) -> list[dict]:
@@ -567,6 +588,56 @@ async def standings(
         "source": "partidas finalizadas importadas",
         "updated_at": datetime.now(timezone.utc),
         "table": rows,
+    }
+
+
+@router.get("/rounds/next")
+async def next_round(
+    competition_id: int | None = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """Retorna todos os jogos da rodada atual ainda em disputa.
+
+    A rodada escolhida é a menor que ainda possui partida agendada. Jogos já
+    finalizados dessa mesma rodada permanecem na resposta para completar a grade.
+    """
+    if competition_id is not None:
+        competition = await session.get(Competition, competition_id)
+    else:
+        competition = await session.scalar(
+            select(Competition)
+            .where(Competition.active.is_(True), Competition.name.ilike("%Série A%"))
+            .order_by(Competition.id.desc())
+            .limit(1)
+        )
+    if not competition:
+        raise HTTPException(404, "Competição não encontrada")
+
+    matches = await MatchRepository(session).list(competition_id=competition.id)
+    now = datetime.now(timezone.utc)
+    upcoming = sorted(
+        (
+            match
+            for match in matches
+            if match.status == MatchStatus.scheduled
+            and match.kickoff >= now - timedelta(hours=6)
+            and match_round_number(match) is not None
+        ),
+        key=lambda match: match.kickoff,
+    )
+    if not upcoming:
+        raise HTTPException(404, "Nenhuma próxima rodada encontrada")
+
+    # A rodada do próximo jogo cronológico evita que partidas antigas adiadas
+    # façam a tela voltar para uma rodada incompleta do começo do campeonato.
+    round_number = match_round_number(upcoming[0])
+    round_matches = [match for match in matches if match_round_number(match) == round_number]
+    return {
+        "round": round_number,
+        "competition_id": competition.id,
+        "competition": competition.name,
+        "season": competition.season,
+        "matches": [serialize(match) for match in round_matches],
     }
 
 

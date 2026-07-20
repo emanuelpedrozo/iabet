@@ -9,10 +9,11 @@ import { useAuth } from '@/lib/use-auth';
 
 export function Header() {
   const pathname = usePathname();
-  const { loggedIn } = useAuth();
+  const { isAdmin } = useAuth();
   const [open, setOpen] = useState(false);
 
   const jogosActive = pathname === '/';
+  const rodadaActive = pathname.startsWith('/rodada');
   const adminActive = pathname.startsWith('/admin');
   const ajudaActive = pathname.startsWith('/ajuda');
 
@@ -42,13 +43,16 @@ export function Header() {
           <Link href="/" className={linkClass(jogosActive)}>
             Jogos
           </Link>
+          <Link href="/rodada" className={linkClass(rodadaActive)}>
+            Próxima rodada
+          </Link>
           <Link href="/#value" className={linkClass(false)}>
             Value bets
           </Link>
           <Link href="/ajuda" className={linkClass(ajudaActive)}>
             Ajuda
           </Link>
-          {loggedIn && (
+          {isAdmin && (
             <Link href="/admin" className={linkClass(adminActive)}>
               Admin
             </Link>
@@ -86,6 +90,11 @@ export function Header() {
               </Link>
             </li>
             <li>
+              <Link href="/rodada" className={linkClass(rodadaActive)} onClick={close}>
+                Próxima rodada
+              </Link>
+            </li>
+            <li>
               <Link href="/#value" className={linkClass(false)} onClick={close}>
                 Value bets
               </Link>
@@ -95,7 +104,7 @@ export function Header() {
                 Ajuda
               </Link>
             </li>
-            {loggedIn && (
+            {isAdmin && (
               <li>
                 <Link href="/admin" className={linkClass(adminActive)} onClick={close}>
                   Admin

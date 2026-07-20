@@ -1,9 +1,12 @@
 import asyncio
 import traceback
 from app.workers.celery_app import celery_app
-from app.core.database import SessionLocal
+from app.core.database import SessionLocal, engine
 from app.models.entities import JobLog
 from app.services.sync import DataSyncService
+from app.services.ml_history import MlHistoryService
+from app.services.ml_training import MlTrainingService
+from app.services.ml_shadow import MlShadowService
 
 
 async def log(job: str, status: str, detail: dict):
@@ -29,13 +32,26 @@ async def _run_logged(job: str, coro_factory):
         raise
 
 
+def _run(job: str, coro_factory):
+    """Run one Celery job without reusing asyncpg connections across event loops."""
+    async def runner():
+        try:
+            return await _run_logged(job, coro_factory)
+        finally:
+            # Celery reuses the same process, while asyncio.run creates a new loop
+            # for every task. Pooled asyncpg connections belong to the old loop.
+            await engine.dispose()
+
+    return asyncio.run(runner())
+
+
 @celery_app.task(name="app.workers.tasks.refresh_odds")
 def refresh_odds():
     async def work():
         async with SessionLocal() as s:
             return await DataSyncService(s).sync_odds()
 
-    return asyncio.run(_run_logged("refresh_odds", work))
+    return _run("refresh_odds", work)
 
 
 @celery_app.task(name="app.workers.tasks.refresh_all")
@@ -49,7 +65,7 @@ def refresh_all():
             predictions = await service.refresh_predictions()
             return {"fixtures": fixtures, "odds": odds, "predictions": predictions}
 
-    return asyncio.run(_run_logged("refresh_all", work))
+    return _run("refresh_all", work)
 
 
 @celery_app.task(name="app.workers.tasks.import_api_futebol_history")
@@ -58,7 +74,7 @@ def import_api_futebol_history():
         async with SessionLocal() as s:
             return await DataSyncService(s).import_api_futebol_history(80)
 
-    return asyncio.run(_run_logged("import_api_futebol_history", work))
+    return _run("import_api_futebol_history", work)
 
 
 @celery_app.task(name="app.workers.tasks.sync_today_matches")
@@ -67,7 +83,7 @@ def sync_today_matches():
         async with SessionLocal() as s:
             return await DataSyncService(s).sync_today_matches()
 
-    return asyncio.run(_run_logged("sync_today_matches", work))
+    return _run("sync_today_matches", work)
 
 
 @celery_app.task(name="app.workers.tasks.sync_bzzoiro_today")
@@ -76,7 +92,7 @@ def sync_bzzoiro_today():
         async with SessionLocal() as s:
             return await DataSyncService(s).sync_bzzoiro_today()
 
-    return asyncio.run(_run_logged("sync_bzzoiro_today", work))
+    return _run("sync_bzzoiro_today", work)
 
 
 @celery_app.task(name="app.workers.tasks.import_cartola_recent")
@@ -85,7 +101,7 @@ def import_cartola_recent():
         async with SessionLocal() as s:
             return await DataSyncService(s).import_cartola_recent(10)
 
-    return asyncio.run(_run_logged("import_cartola_recent", work))
+    return _run("import_cartola_recent", work)
 
 
 @celery_app.task(name="app.workers.tasks.refresh_predictions")
@@ -94,7 +110,43 @@ def refresh_predictions():
         async with SessionLocal() as s:
             return await DataSyncService(s).refresh_predictions()
 
-    return asyncio.run(_run_logged("refresh_predictions", work))
+    return _run("refresh_predictions", work)
+
+
+@celery_app.task(name="app.workers.tasks.import_bzzoiro_ml_history")
+def import_bzzoiro_ml_history(year: int, include_details: bool = False):
+    async def work():
+        async with SessionLocal() as s:
+            return await MlHistoryService(s).import_bzzoiro_serie_a(year, include_details)
+
+    return _run(f"import_bzzoiro_ml_history_{year}", work)
+
+
+@celery_app.task(name="app.workers.tasks.import_football_data_ml_history")
+def import_football_data_ml_history(year: int):
+    async def work():
+        async with SessionLocal() as s:
+            return await MlHistoryService(s).import_football_data_serie_a(year)
+
+    return _run(f"import_football_data_ml_history_{year}", work)
+
+
+@celery_app.task(name="app.workers.tasks.train_ml_result_baseline")
+def train_ml_result_baseline():
+    async def work():
+        async with SessionLocal() as s:
+            return await MlTrainingService(s).train_result_baseline()
+
+    return _run("train_ml_result_baseline", work)
+
+
+@celery_app.task(name="app.workers.tasks.materialize_ml_shadow")
+def materialize_ml_shadow():
+    async def work():
+        async with SessionLocal() as s:
+            return await MlShadowService(s).materialize()
+
+    return _run("materialize_ml_shadow", work)
 
 
 @celery_app.task(name="app.workers.tasks.import_api_sports_history")
@@ -106,4 +158,4 @@ def import_api_sports_history():
             serie_b = await service.import_api_sports_history(2024, 38, "B")
             return {"serie_a": serie_a, "serie_b": serie_b}
 
-    return asyncio.run(_run_logged("import_api_sports_history", work))
+    return _run("import_api_sports_history", work)
