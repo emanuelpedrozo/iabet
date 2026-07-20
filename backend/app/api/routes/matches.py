@@ -4,7 +4,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_session
-from app.models.entities import Match, MatchStatus, Player, PlayerMatchStat, TeamStat
+from app.models.entities import Competition, Match, MatchStatus, Player, PlayerMatchStat, Team, TeamStat
 from app.repositories.matches import MatchRepository
 from app.schemas.matches import AnalysisOut, MatchListOut
 from app.services.models import ModelInput, ensemble
@@ -493,6 +493,81 @@ async def list_matches(
     start = date or datetime.now(timezone.utc) - timedelta(hours=3)
     end = (date + timedelta(days=1)) if date else start + timedelta(days=14)
     return [serialize(m) for m in await MatchRepository(session).list(start, end, competition_id)]
+
+
+@router.get("/standings")
+async def standings(
+    competition_id: int | None = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """Classificação calculada exclusivamente com partidas finalizadas importadas."""
+    if competition_id is not None:
+        competition = await session.get(Competition, competition_id)
+    else:
+        competition = await session.scalar(
+            select(Competition)
+            .where(Competition.active.is_(True), Competition.name.ilike("%Série A%"))
+            .order_by(Competition.id.desc())
+            .limit(1)
+        )
+    if not competition:
+        raise HTTPException(404, "Competição não encontrada")
+
+    finished = list(
+        await session.scalars(
+            select(Match).where(
+                Match.competition_id == competition.id,
+                Match.status == MatchStatus.finished,
+                Match.home_score.is_not(None),
+                Match.away_score.is_not(None),
+            )
+        )
+    )
+    team_ids = {team_id for match in finished for team_id in (match.home_team_id, match.away_team_id)}
+    teams = {
+        team.id: team
+        for team in await session.scalars(select(Team).where(Team.id.in_(team_ids)))
+    } if team_ids else {}
+    table = {
+        team_id: {"team": team, "played": 0, "wins": 0, "draws": 0, "losses": 0,
+                  "goals_for": 0, "goals_against": 0, "points": 0}
+        for team_id, team in teams.items()
+    }
+    for match in finished:
+        home = table[match.home_team_id]
+        away = table[match.away_team_id]
+        home_goals, away_goals = int(match.home_score), int(match.away_score)
+        for row, scored, conceded in ((home, home_goals, away_goals), (away, away_goals, home_goals)):
+            row["played"] += 1
+            row["goals_for"] += scored
+            row["goals_against"] += conceded
+        if home_goals > away_goals:
+            home["wins"] += 1; home["points"] += 3; away["losses"] += 1
+        elif away_goals > home_goals:
+            away["wins"] += 1; away["points"] += 3; home["losses"] += 1
+        else:
+            home["draws"] += 1; away["draws"] += 1; home["points"] += 1; away["points"] += 1
+
+    rows = list(table.values())
+    for row in rows:
+        row["goal_difference"] = row["goals_for"] - row["goals_against"]
+    rows.sort(key=lambda row: (row["points"], row["wins"], row["goal_difference"], row["goals_for"]), reverse=True)
+    for position, row in enumerate(rows, 1):
+        row["position"] = position
+        team = row["team"]
+        row["team"] = {
+            "id": team.id, "name": team.name, "short_name": team.short_name,
+            "crest_url": team.crest_url, "elo": team.elo,
+            "attack_strength": team.attack_strength, "defense_strength": team.defense_strength,
+        }
+    return {
+        "competition_id": competition.id,
+        "competition": competition.name,
+        "season": competition.season,
+        "source": "partidas finalizadas importadas",
+        "updated_at": datetime.now(timezone.utc),
+        "table": rows,
+    }
 
 
 @router.get("/{match_id}", response_model=AnalysisOut)

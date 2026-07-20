@@ -9,7 +9,7 @@ import { API } from '@/lib/api';
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 
-export function MatchCard({ m, index }: { m: Match; index: number }) {
+export function MatchCard({ m, index, positions = {} }: { m: Match; index: number; positions?: Record<number, number> }) {
   const reduceMotion = useReducedMotion();
   const motionProps = reduceMotion
     ? {}
@@ -45,9 +45,9 @@ export function MatchCard({ m, index }: { m: Match; index: number }) {
         )}
       </div>
       <div className="my-4 grid min-h-[104px] grid-cols-[1fr_28px_1fr] items-center">
-        <Team team={m.home_team} />
+        <Team team={m.home_team} position={positions[m.home_team.id]} />
         <div className="text-center text-sm text-muted">×</div>
-        <Team team={m.away_team} />
+        <Team team={m.away_team} position={positions[m.away_team.id]} />
       </div>
       <div className="grid grid-cols-3 gap-3 border-t border-line/70 pt-4">
         <Probability label="Casa" value={m.probabilities?.home} />
@@ -121,12 +121,13 @@ function ModelPick({ m }: { m: Match }) {
   );
 }
 
-function Team({ team }: { team: TeamType }) {
+function Team({ team, position }: { team: TeamType; position?: number }) {
   return (
     <div className="flex min-w-0 flex-col items-center text-center">
       <Crest team={team} />
-      <div className="mt-2 line-clamp-2 min-h-[40px] max-w-[140px] text-sm font-semibold leading-5">
-        {team.name}
+      <div className="mt-2 flex min-h-[40px] max-w-[150px] items-start justify-center gap-1.5 text-sm font-semibold leading-5">
+        <span className="line-clamp-2">{team.name}</span>
+        {position && <span className="mt-0.5 shrink-0 rounded bg-white/[.06] px-1.5 py-0.5 text-[10px] leading-4 text-muted">{position}º</span>}
       </div>
     </div>
   );

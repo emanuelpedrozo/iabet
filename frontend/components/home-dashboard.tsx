@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { MatchCard } from '@/components/match-card';
 import type { Match } from '@/lib/api';
+import type { Standings } from '@/lib/api';
 
 type Filter = 'all' | 'value' | 'today' | 'tomorrow';
 const filters: { id: Filter; label: string }[] = [
@@ -21,7 +22,7 @@ const filters: { id: Filter; label: string }[] = [
   { id: 'tomorrow', label: 'Amanhã' },
 ];
 
-export function HomeDashboard({ matches, error }: { matches: Match[]; error: string }) {
+export function HomeDashboard({ matches, standings, error }: { matches: Match[]; standings: Standings | null; error: string }) {
   const [filter, setFilter] = useState<Filter>('all');
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState(false);
@@ -56,6 +57,7 @@ export function HomeDashboard({ matches, error }: { matches: Match[]; error: str
       !current || (m.best_value?.edge || 0) > current.edge ? m.best_value : current,
     undefined,
   );
+  const positions = Object.fromEntries((standings?.table || []).map((row) => [row.team.id, row.position]));
 
   return (
     <main className="mx-auto max-w-7xl px-5 pb-14 pt-8">
@@ -141,7 +143,7 @@ export function HomeDashboard({ matches, error }: { matches: Match[]; error: str
           <>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {visible.map((m, i) => (
-                <MatchCard key={m.id} m={m} index={i} />
+                <MatchCard key={m.id} m={m} index={i} positions={positions} />
               ))}
             </div>
             {filtered.length > 6 && (
@@ -166,7 +168,26 @@ export function HomeDashboard({ matches, error }: { matches: Match[]; error: str
           <Empty />
         )}
       </section>
+      {standings?.table.length ? <StandingsTable standings={standings} /> : null}
     </main>
+  );
+}
+
+function StandingsTable({ standings }: { standings: Standings }) {
+  return (
+    <section className="card mt-8 overflow-hidden" aria-labelledby="standings-title">
+      <div className="flex flex-col justify-between gap-2 border-b border-line p-5 md:flex-row md:items-end md:px-6">
+        <div><div className="label">Campeonato</div><h2 id="standings-title" className="mt-1 text-xl font-bold">Classificação · {standings.competition}</h2></div>
+        <p className="text-xs text-muted">Temporada {standings.season} · calculada com jogos finalizados</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[680px] text-sm">
+          <thead className="border-b border-line bg-black/10 text-[10px] uppercase tracking-wider text-muted"><tr><th className="w-14 px-4 py-3 text-center">Pos.</th><th className="px-3 py-3 text-left">Clube</th><th className="px-3 py-3 text-center">Pts</th><th className="px-3 py-3 text-center">J</th><th className="px-3 py-3 text-center">V</th><th className="px-3 py-3 text-center">E</th><th className="px-3 py-3 text-center">D</th><th className="px-3 py-3 text-center">GP</th><th className="px-3 py-3 text-center">GC</th><th className="px-3 py-3 text-center">SG</th></tr></thead>
+          <tbody className="divide-y divide-line/70">{standings.table.map(row=><tr key={row.team.id} className="transition hover:bg-white/[.02]"><td className="px-4 py-3 text-center"><span className={`inline-flex h-7 w-7 items-center justify-center rounded-lg text-xs font-bold ${row.position<=4?'bg-brand/10 text-brand':row.position>=17?'bg-red-400/10 text-red-300':'bg-white/[.04] text-muted'}`}>{row.position}</span></td><td className="px-3 py-3"><div className="flex items-center gap-3">{row.team.crest_url?<img src={row.team.crest_url} alt="" className="h-7 w-7 object-contain"/>:<span className="flex h-7 w-7 items-center justify-center rounded bg-white/[.04] text-[9px]">{row.team.short_name.slice(0,3)}</span>}<b>{row.team.name}</b></div></td><td className="px-3 py-3 text-center font-black text-white">{row.points}</td><td className="px-3 py-3 text-center text-muted">{row.played}</td><td className="px-3 py-3 text-center text-muted">{row.wins}</td><td className="px-3 py-3 text-center text-muted">{row.draws}</td><td className="px-3 py-3 text-center text-muted">{row.losses}</td><td className="px-3 py-3 text-center text-muted">{row.goals_for}</td><td className="px-3 py-3 text-center text-muted">{row.goals_against}</td><td className="px-3 py-3 text-center text-muted">{row.goal_difference>0?`+${row.goal_difference}`:row.goal_difference}</td></tr>)}</tbody>
+        </table>
+      </div>
+      <div className="flex flex-wrap gap-4 border-t border-line px-5 py-3 text-[11px] text-muted"><span><i className="mr-1.5 inline-block h-2 w-2 rounded-full bg-brand"/>G-4</span><span><i className="mr-1.5 inline-block h-2 w-2 rounded-full bg-red-300"/>Z-4</span><span>Critérios: pontos, vitórias, saldo e gols marcados.</span></div>
+    </section>
   );
 }
 

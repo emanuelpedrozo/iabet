@@ -43,6 +43,28 @@ export type Match = {
   } | null;
 };
 
+export type StandingRow = {
+  position: number;
+  team: Team;
+  played: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  goals_for: number;
+  goals_against: number;
+  goal_difference: number;
+  points: number;
+};
+
+export type Standings = {
+  competition_id: number;
+  competition: string;
+  season: string;
+  source: string;
+  updated_at: string;
+  table: StandingRow[];
+};
+
 export function getToken(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem(TOKEN_KEY);
@@ -76,6 +98,12 @@ export async function apiFetch(path: string, init: RequestInit = {}) {
 export async function getMatches(): Promise<Match[]> {
   const r = await fetch(`${SERVER_API}/matches`, { cache: 'no-store' });
   if (!r.ok) throw new Error('API indisponível');
+  return r.json();
+}
+
+export async function getStandings(): Promise<Standings> {
+  const r = await fetch(`${SERVER_API}/matches/standings`, { cache: 'no-store' });
+  if (!r.ok) throw new Error('Classificação indisponível');
   return r.json();
 }
 
