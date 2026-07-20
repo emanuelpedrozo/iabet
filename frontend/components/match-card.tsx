@@ -137,7 +137,7 @@ function Crest({ team }: { team: TeamType }) {
   const [failed, setFailed] = useState(false);
   return (
     <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl border border-line bg-white/[.04] font-black text-white">
-      <span>{team.short_name.slice(0, 3)}</span>
+      {(!team.crest_url || failed) && <span>{team.short_name.slice(0, 3)}</span>}
       {team.crest_url && !failed && (
         <img
           src={team.crest_url}
