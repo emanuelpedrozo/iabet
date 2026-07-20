@@ -70,6 +70,15 @@ def sync_today_matches():
     return asyncio.run(_run_logged("sync_today_matches", work))
 
 
+@celery_app.task(name="app.workers.tasks.sync_bzzoiro_today")
+def sync_bzzoiro_today():
+    async def work():
+        async with SessionLocal() as s:
+            return await DataSyncService(s).sync_bzzoiro_today()
+
+    return asyncio.run(_run_logged("sync_bzzoiro_today", work))
+
+
 @celery_app.task(name="app.workers.tasks.import_cartola_recent")
 def import_cartola_recent():
     async def work():

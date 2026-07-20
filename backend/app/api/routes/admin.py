@@ -10,6 +10,7 @@ from app.providers.football_data import FootballDataProvider
 from app.providers.odds_api import OddsApiProvider
 from app.providers.api_sports import ApiSportsProvider
 from app.providers.cartola import CartolaProvider
+from app.providers.bzzoiro import BzzoiroProvider
 from app.services.sync import DataSyncService
 
 router = APIRouter(prefix="/admin", tags=["Admin"], dependencies=[Depends(admin)])
@@ -62,6 +63,7 @@ async def providers():
         await safe("api_futebol", ApiFutebolProvider().status),
         await safe("api_sports", ApiSportsProvider().status),
         await safe("cartola", CartolaProvider().status),
+        await safe("bzzoiro", BzzoiroProvider().status),
     ]
 
 
@@ -110,6 +112,14 @@ async def sync_today_matches(session: AsyncSession = Depends(get_session)):
     try:
         return await DataSyncService(session).sync_today_matches()
     except ValueError as exc:
+        raise _map_sync_error(exc) from exc
+
+
+@router.post("/sync/bzzoiro-today")
+async def sync_bzzoiro_today(session: AsyncSession = Depends(get_session)):
+    try:
+        return await DataSyncService(session).sync_bzzoiro_today()
+    except (ValueError, RuntimeError) as exc:
         raise _map_sync_error(exc) from exc
 
 

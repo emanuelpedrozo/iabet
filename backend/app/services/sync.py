@@ -12,6 +12,7 @@ from app.providers.cartola import CartolaProvider, cartola_metrics
 from app.providers.football_data import FootballDataProvider
 from app.providers.odds_api import EVENT_STAT_MARKETS, OddsApiProvider
 from app.providers.api_futebol import ApiFutebolProvider
+from app.providers.bzzoiro import BzzoiroProvider
 from app.services.models import ModelInput, ensemble
 from app.services.stat_rates import attach_stat_markets_to_prediction, match_stat_lambdas
 from app.services.strengths import StrengthService
@@ -676,6 +677,105 @@ class DataSyncService:
             "errors": errors,
             "predictions": predictions,
         }
+
+    async def sync_bzzoiro_today(self) -> dict:
+        """Vincula jogos de hoje/amanhã e importa escalações v2 sem remover fallbacks."""
+        provider = BzzoiroProvider()
+        if not provider.configured:
+            return {"provider": "bzzoiro", "configured": False, "skipped": "missing_api_key"}
+        now = datetime.now(timezone.utc)
+        local_now = now.astimezone(ZoneInfo("America/Sao_Paulo"))
+        start_local = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_local = start_local + timedelta(days=2)
+        start, end = start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
+        remote = await provider.events(start.isoformat(), end.isoformat())
+        local = list(
+            await self.session.scalars(
+                select(Match)
+                .where(Match.kickoff >= start, Match.kickoff < end)
+                .options(selectinload(Match.home_team), selectinload(Match.away_team))
+            )
+        )
+        linked, imported, unavailable, errors, odds_inserted = 0, [], [], [], 0
+        touched: set[int] = set()
+        for match in local:
+            candidate = next(
+                (
+                    row for row in remote
+                    if normalize(str(row.get("home_team") or "")) == normalize(match.home_team.name)
+                    and normalize(str(row.get("away_team") or "")) == normalize(match.away_team.name)
+                ),
+                None,
+            )
+            if not candidate:
+                unavailable.append({"match_id": match.id, "reason": "event_not_matched"})
+                continue
+            event_id = int(candidate["id"])
+            linked += 1
+            try:
+                lineup = await provider.lineups(event_id)
+                odds_data = await provider.odds_comparison(event_id)
+                meta = dict(match.metadata_ or {})
+                external_ids = dict(meta.get("external_ids") or {})
+                external_ids["bzzoiro"] = str(event_id)
+                meta["external_ids"] = external_ids
+                meta["bzzoiro"] = {
+                    **dict(meta.get("bzzoiro") or {}),
+                    "lineup_status": lineup.get("lineup_status", "unavailable"),
+                    "lineups": lineup.get("lineups"),
+                    "unavailable_players": lineup.get("unavailable_players"),
+                    "updated_at": lineup.get("updated_at"),
+                    "synced_at": now.isoformat(),
+                }
+                match.metadata_ = meta
+                inserted = self._ingest_bzzoiro_odds(match, odds_data)
+                odds_inserted += inserted
+                touched.add(match.id)
+                imported.append({"match_id": match.id, "event_id": event_id,
+                                 "status": lineup.get("lineup_status"), "odds": inserted})
+            except Exception as exc:
+                errors.append({"match_id": match.id, "event_id": event_id, "error": str(exc)[:180]})
+        await self.session.flush()
+        pruned = await self._prune_odds(touched, keep=ODDS_RETENTION)
+        await self.session.commit()
+        return {"provider": "bzzoiro", "received": len(remote), "local": len(local), "linked": linked,
+                "imported": imported, "odds_inserted": odds_inserted, "odds_pruned": pruned,
+                "unavailable": unavailable, "errors": errors}
+
+    def _ingest_bzzoiro_odds(self, match: Match, payload: dict) -> int:
+        """Normaliza somente mercados que o modelo do IABet sabe precificar."""
+        market_map = {
+            "1x2": "match_result", "over_under_15": "goals_2_5",
+            "over_under_25": "goals_2_5", "over_under_35": "goals_2_5",
+            "btts": "btts", "total_corners": "corners",
+        }
+        result_map = {"HOME": "home", "DRAW": "draw", "AWAY": "away"}
+        inserted = 0
+        for remote_market, outcomes in (payload.get("markets") or {}).items():
+            market = market_map.get(remote_market)
+            if not market:
+                continue
+            for outcome in outcomes.values():
+                selection = result_map.get(str(outcome.get("outcome") or "").upper())
+                if not selection:
+                    selection = str(outcome.get("outcome") or "").lower()
+                line = as_float(outcome.get("line"))
+                if market == "corners" and line not in {8.5, 9.5, 10.5}:
+                    continue
+                for slug, book in (outcome.get("bookmakers") or {}).items():
+                    price = as_float(book.get("decimal_odds"))
+                    if not price or price <= 1:
+                        continue
+                    raw_time = book.get("updated_at")
+                    try:
+                        captured = datetime.fromisoformat(str(raw_time).replace("Z", "+00:00"))
+                    except (TypeError, ValueError):
+                        captured = datetime.now(timezone.utc)
+                    self.session.add(Odd(match_id=match.id, bookmaker=slug,
+                                         market=market, selection=selection, line=line,
+                                         price=price, captured_at=captured))
+                    inserted += 1
+        return inserted
 
     async def import_cartola_recent(self, rounds: int = 10) -> dict:
         """Importa scouts individuais das últimas rodadas concluídas do Cartola."""

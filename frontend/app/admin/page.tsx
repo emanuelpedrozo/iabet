@@ -133,6 +133,11 @@ export default function Admin() {
             onClick={() => runAction('/admin/sync/predictions', 'Predições')}
             label="Materializar predições"
           />
+          <Action
+            disabled={actionBusy}
+            onClick={() => runAction('/admin/sync/bzzoiro-today', 'Bzzoiro e escalações')}
+            label="Importar Bzzoiro"
+          />
         </div>
       </section>
 

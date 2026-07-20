@@ -662,6 +662,7 @@ async def match_analysis(match_id: int, session: AsyncSession = Depends(get_sess
         },
         "h2h": h2h,
         "players": m.metadata_.get("players", {}),
+        "lineups": m.metadata_.get("bzzoiro", {}),
         "historical_stats": historical_stats,
         "generated_at": datetime.now(timezone.utc),
     }

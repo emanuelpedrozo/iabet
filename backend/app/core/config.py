@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     api_futebol_key: str | None = None
     football_data_key: str | None = None
     footystats_api_key: str | None = None
+    bzzoiro_api_key: str | None = None
+    bzzoiro_api_host: str = "https://sports.bzzoiro.com"
     cors_origins: str = "http://localhost:3000"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
