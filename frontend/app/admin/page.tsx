@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { KeyRound, RefreshCw, ScrollText, Users } from 'lucide-react';
+import { Activity, BrainCircuit, Database, KeyRound, LayoutDashboard, RefreshCw, ScrollText, ShieldCheck, Users } from 'lucide-react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 
 type Overview = {
@@ -15,6 +15,15 @@ type ManagedUser = { id: number; email: string; role: 'user' | 'admin'; active: 
 type Invitation = { id: number; role: string; status: 'active' | 'used' | 'expired'; expires_at: string; used_at?: string | null };
 
 type Provider = { name: string; healthy: boolean; error?: string };
+type AdminTab = 'overview' | 'access' | 'data' | 'ml' | 'monitor';
+
+const adminTabs: { id: AdminTab; label: string; description: string; icon: React.ReactNode }[] = [
+  { id: 'overview', label: 'Visão geral', description: 'Resumo do ambiente e dos dados cadastrados.', icon: <LayoutDashboard size={17} aria-hidden /> },
+  { id: 'access', label: 'Acessos', description: 'Aprove usuários, bloqueie contas e gere convites.', icon: <ShieldCheck size={17} aria-hidden /> },
+  { id: 'data', label: 'Dados', description: 'Execute sincronizações e atualize as fontes esportivas.', icon: <Database size={17} aria-hidden /> },
+  { id: 'ml', label: 'Machine Learning', description: 'Importe históricos, treine e acompanhe o modelo sombra.', icon: <BrainCircuit size={17} aria-hidden /> },
+  { id: 'monitor', label: 'Monitoramento', description: 'Confira a saúde dos providers e as últimas execuções.', icon: <Activity size={17} aria-hidden /> },
+];
 type MlQuality = {
   matches?: number;
   usable_matches?: number;
@@ -90,6 +99,7 @@ type MlOverview = {
 };
 
 export default function Admin() {
+  const [activeTab, setActiveTab] = useState<AdminTab>('overview');
   const [overview, setOverview] = useState<Overview | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [users, setUsers] = useState<ManagedUser[]>([]);
@@ -268,13 +278,34 @@ export default function Admin() {
         </p>
       )}
 
-      <section className="mt-8 grid gap-4 sm:grid-cols-3">
+      <nav aria-label="Seções do painel" className="mt-8 overflow-x-auto rounded-2xl border border-line bg-white/[.02] p-1.5">
+        <div className="flex min-w-max gap-1">
+          {adminTabs.map(tab => (
+            <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)}
+              aria-current={activeTab === tab.id ? 'page' : undefined}
+              className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${activeTab === tab.id ? 'bg-white/10 text-white shadow-sm' : 'text-muted hover:bg-white/[.04] hover:text-white'}`}>
+              {tab.icon}<span>{tab.label}</span>
+              {tab.id === 'access' && (overview?.pending_users || 0) > 0 && (
+                <span className="rounded-full bg-amber-300/15 px-1.5 py-0.5 text-[10px] text-amber-300">{overview?.pending_users}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      <div className="mt-6">
+        <div className="label text-brand">{adminTabs.find(tab => tab.id === activeTab)?.label}</div>
+        <p className="mt-1 text-sm text-muted">{adminTabs.find(tab => tab.id === activeTab)?.description}</p>
+      </div>
+
+      {activeTab === 'overview' && <section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat icon={<Users aria-hidden />} label="Usuários" value={overview?.users ?? 0} />
+        <Stat icon={<ShieldCheck aria-hidden />} label="Aguardando aprovação" value={overview?.pending_users ?? 0} />
         <Stat icon={<KeyRound aria-hidden />} label="Times" value={overview?.teams ?? 0} />
         <Stat icon={<ScrollText aria-hidden />} label="Partidas" value={overview?.matches ?? 0} />
-      </section>
+      </section>}
 
-      <section className="card mt-8 overflow-hidden">
+      {activeTab === 'access' && <section className="card mt-6 overflow-hidden">
         <div className="flex flex-col justify-between gap-4 border-b border-line p-5 md:flex-row md:items-end md:px-6">
           <div><div className="label text-brand">Controle de acesso</div><h2 className="mt-1 text-xl font-bold">Usuários e convites</h2><p className="mt-1 text-sm text-muted">Cadastros sem convite aguardam sua aprovação.</p></div>
           <Action disabled={actionBusy} label="Gerar convite de usuário" onClick={createInvite}/>
@@ -288,11 +319,11 @@ export default function Admin() {
           {!users.length && <p className="p-5 text-sm text-muted">Nenhum usuário encontrado.</p>}
         </div>
         {!!invitations.length && <div className="border-t border-line px-5 py-4 text-xs text-muted md:px-6"><b className="mr-3 text-white">Convites recentes</b>{invitations.slice(0,6).map(invitation => <span key={invitation.id} className="mr-3 inline-block">#{invitation.id} · {invitation.status === 'active' ? 'ativo' : invitation.status === 'used' ? 'utilizado' : 'expirado'}</span>)}</div>}
-      </section>
+      </section>}
 
-      <section className="mt-8" aria-busy={actionBusy}>
-        <h2 className="text-xl font-bold">Ações</h2>
-        <div className="mt-4 flex flex-wrap gap-3">
+      {(activeTab === 'data' || activeTab === 'ml') && <section className="mt-6" aria-busy={actionBusy}>
+        <h2 className="text-xl font-bold">{activeTab === 'data' ? 'Sincronizações manuais' : 'Preparação e execução do modelo'}</h2>
+        {activeTab === 'data' && <div className="mt-4 flex flex-wrap gap-3">
           <Action
             disabled={actionBusy}
             onClick={() => runAction('/admin/refresh', 'Pipeline completo')}
@@ -323,8 +354,8 @@ export default function Admin() {
             onClick={() => runAction('/admin/sync/bzzoiro-today', 'Bzzoiro e escalações')}
             label="Importar Bzzoiro"
           />
-        </div>
-        <div className="mt-5 flex flex-wrap items-end gap-3 rounded-2xl border border-line bg-white/[.02] p-4">
+        </div>}
+        {activeTab === 'ml' && <div className="mt-4 flex flex-wrap items-end gap-3 rounded-2xl border border-line bg-white/[.02] p-4">
           <label className="text-xs text-muted">Temporada Série A
             <input type="number" min="2001" max={new Date().getFullYear()} value={mlYear}
               onChange={event => setMlYear(Number(event.target.value))}
@@ -344,10 +375,10 @@ export default function Admin() {
           {mlMessage && (
             <p role="status" className="w-full text-sm text-brand">{mlMessage}</p>
           )}
-        </div>
-      </section>
+        </div>}
+      </section>}
 
-      <section className="mt-8 card p-6">
+      {activeTab === 'ml' && <section className="mt-6 card p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="label text-brand">Base histórica de ML</div>
@@ -510,9 +541,9 @@ export default function Admin() {
             </div>
           );
         })()}
-      </section>
+      </section>}
 
-      <section className="mt-10 grid gap-6 lg:grid-cols-2">
+      {activeTab === 'monitor' && <section className="mt-6 grid gap-6 lg:grid-cols-2">
         <div className="card p-6">
           <div className="flex items-center gap-2 text-brand">
             <RefreshCw size={18} aria-hidden />
@@ -552,7 +583,7 @@ export default function Admin() {
             {!overview?.logs?.length && <li className="text-muted">Nenhum log ainda.</li>}
           </ul>
         </div>
-      </section>
+      </section>}
     </main>
   );
 }
