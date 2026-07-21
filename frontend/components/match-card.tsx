@@ -9,6 +9,37 @@ import { API } from '@/lib/api';
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 
+const marketLabels: Record<string, string> = {
+  match_result: 'Resultado da partida',
+  goals_2_5: 'Total de gols',
+  totals: 'Total de gols',
+  btts: 'Ambas marcam',
+  corners: 'Escanteios',
+  cards: 'Cartões',
+  shots: 'Finalizações',
+};
+
+const selectionLabels: Record<string, string> = {
+  home: 'Vitória do mandante',
+  away: 'Vitória do visitante',
+  draw: 'Empate',
+  over: 'Mais de',
+  under: 'Menos de',
+  yes: 'Sim',
+  no: 'Não',
+};
+
+function bestValueLabel(value: NonNullable<Match['best_value']>) {
+  const market = marketLabels[value.market] ?? value.market.replaceAll('_', ' ');
+  let selection = selectionLabels[value.selection] ?? value.selection.replaceAll('_', ' ');
+
+  if (value.line != null && (value.selection === 'over' || value.selection === 'under')) {
+    selection += ` ${value.line.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}`;
+  }
+
+  return `${market} · ${selection}`;
+}
+
 export function MatchCard({ m, index, positions = {} }: { m: Match; index: number; positions?: Record<number, number> }) {
   const reduceMotion = useReducedMotion();
   const motionProps = reduceMotion
@@ -66,7 +97,7 @@ export function MatchCard({ m, index, positions = {} }: { m: Match; index: numbe
             </div>
             <div className="mt-1 flex items-end justify-between gap-3">
               <b className="truncate">
-                {m.best_value.market} · {m.best_value.selection}
+                {bestValueLabel(m.best_value)}
               </b>
               <b className="shrink-0 text-xl text-brand">{m.best_value.odd.toFixed(2)}</b>
             </div>

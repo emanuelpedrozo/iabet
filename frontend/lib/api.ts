@@ -37,6 +37,7 @@ export type Match = {
   best_value?: {
     market: string;
     selection: string;
+    line?: number | null;
     odd: number;
     edge: number;
     strength: string;

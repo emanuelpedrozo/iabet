@@ -56,6 +56,7 @@ Odds de escanteios/cartões vêm do endpoint por evento da Odds API (`alternate_
 5. Value bets: de-vig, **consenso** entre casas, **movimento** de odd, limiares e `rank_score` (inclui corners/cards quando há odd). H2H vem do banco na análise.
 6. Histórico detalhado: API Futebol e API-Sports gravam `TeamStat` com **merge**; API-Sports grava `PlayerMatchStat`. Médias/λ de stats usam **somente os últimos 10 finished** do time na competição (sem janela de temporada antiga). Odds extras de corners/cards: até N eventos por sync.
 7. Sync de odds featured (h2h/totals/btts) + evento (`alternate_totals_corners`, `alternate_totals_cards`).
+8. **ML modo sombra** (não altera recomendações): histórico `ml_*`, treino logístico com forma 10 + corners/cards, temperatura de calibração; só modelos `approved` materializam `MlShadowPrediction` para comparação com o ensemble.
 
 ## Autorização
 
@@ -64,4 +65,4 @@ Odds de escanteios/cartões vêm do endpoint por evento da Odds API (`alternate_
 
 ## Roadmap de modelagem
 
-Shin além do de-vig multiplicativo, calibração Brier/CLV, ML com dataset versionado e odds de chutes (quando a casa não publica) permanecem fora do núcleo atual.
+Shin além do de-vig multiplicativo, CLV em produção e blend ML→value (só após o shadow bater o ensemble de forma estável) permanecem fora do núcleo atual. O ML já roda em **modo sombra** no admin.

@@ -45,7 +45,7 @@ type MlOverview = {
     test_season: number;
     train_samples: number;
     test_samples: number;
-    metrics: { accuracy?: number; log_loss?: number; brier?: number; majority_baseline_accuracy?: number; baseline_log_loss?: number; baseline_brier?: number };
+    metrics: { accuracy?: number; log_loss?: number; brier?: number; majority_baseline_accuracy?: number; baseline_log_loss?: number; baseline_brier?: number; markets?: Record<string, { available?: boolean; approved?: boolean; train_samples?: number; test_samples?: number; accuracy?: number; log_loss?: number }> };
     created_at: string;
   }[];
   shadow: {
@@ -63,9 +63,9 @@ type MlOverview = {
       status?: string;
       home_score?: number | null;
       away_score?: number | null;
-      probabilities: Record<'home' | 'draw' | 'away', number>;
+      probabilities: Record<string, number>;
       comparison: {
-        active_probabilities: Record<'home' | 'draw' | 'away', number>;
+        active_probabilities: Record<string, number | null>;
         active_pick: 'home' | 'draw' | 'away';
         shadow_pick: 'home' | 'draw' | 'away';
         same_pick: boolean;
@@ -73,6 +73,7 @@ type MlOverview = {
       };
     }[];
     backtest?: {
+      window_days?: number;
       games: number;
       shadow_accuracy: number | null;
       active_accuracy: number | null;
@@ -85,7 +86,7 @@ type MlOverview = {
         home_score: number;
         away_score: number;
         kickoff: string;
-        probabilities: Record<'home' | 'draw' | 'away', number>;
+        probabilities: Record<string, number>;
         comparison: {
           outcome: 'home' | 'draw' | 'away';
           active_pick: 'home' | 'draw' | 'away';
@@ -393,7 +394,7 @@ export default function Admin() {
             <b>Modo sombra · {mlOverview?.shadow?.round ? `rodada ${mlOverview.shadow.round}` : 'próxima rodada'}</b>
             <span className={mlOverview?.shadow?.active ? 'text-brand' : 'text-amber-300'}>
               {mlOverview?.shadow?.active
-                ? `${mlOverview.shadow.model_status === 'approved' ? 'modelo aprovado' : 'modelo experimental'}, sem afetar recomendações`
+                ? 'modelo approved · forma 10 · calibração · sem afetar recomendações'
                 : 'aguardando a primeira execução'}
             </span>
           </div>
@@ -404,7 +405,8 @@ export default function Admin() {
               : ' · aguardando comparações'}
           </p>
           <p className="mt-1 text-xs text-muted">
-            Comparação do mercado 1X2 somente para todos os jogos da próxima rodada. Partidas de rodadas posteriores não entram nesta tabela.
+            1X2, gols e, quando houver amostra histórica suficiente, cartões e escanteios. Somente jogos da próxima rodada entram nesta tabela.
+            Chips verdes indicam probabilidade ≥60%; não significam value bet sem comparação com a odd.
           </p>
           {!!mlOverview?.shadow?.comparisons?.length && (
             <div className="mt-4 overflow-x-auto rounded-xl border border-line">
@@ -437,10 +439,20 @@ export default function Admin() {
                         <td className="px-3 py-3">
                           <b className="block text-white">{labels[activePick]}</b>
                           <span className="text-muted">{((row.comparison.active_probabilities[activePick] || 0) * 100).toFixed(1)}%</span>
+                          <div className="mt-2 flex max-w-[260px] flex-wrap gap-1 text-[10px]">
+                            <MarketProbabilityBadge label="+2,5 gols" value={row.comparison.active_probabilities?.over_2_5 ?? row.comparison.active_probabilities?.goals_over_2_5} />
+                            <MarketProbabilityBadge label="+9,5 esc." value={row.comparison.active_probabilities?.corners_over_9_5} />
+                            <MarketProbabilityBadge label="+4,5 cartões" value={row.comparison.active_probabilities?.cards_over_4_5} />
+                          </div>
                         </td>
                         <td className="px-3 py-3">
                           <b className="block text-white">{labels[shadowPick]}</b>
                           <span className="text-muted">{((row.probabilities[shadowPick] || 0) * 100).toFixed(1)}%</span>
+                          <div className="mt-2 flex max-w-[260px] flex-wrap gap-1 text-[10px]">
+                            <MarketProbabilityBadge label="+2,5 gols" value={row.probabilities.goals_over_2_5 ?? row.probabilities.over_2_5} />
+                            <MarketProbabilityBadge label="+9,5 esc." value={row.probabilities.corners_over_9_5} />
+                            <MarketProbabilityBadge label="+4,5 cartões" value={row.probabilities.cards_over_4_5} />
+                          </div>
                         </td>
                         <td className="px-3 py-3 font-bold text-amber-300">
                           {((row.comparison.max_probability_delta || 0) * 100).toFixed(1)} p.p.
@@ -459,7 +471,7 @@ export default function Admin() {
             <div className="mt-5 border-t border-line pt-5">
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
-                  <div className="label text-brand">Últimos 7 dias</div>
+                  <div className="label text-brand">Últimos {mlOverview?.shadow?.backtest?.window_days || 30} dias</div>
                   <h3 className="mt-1 font-bold text-white">Backtest com resultados reais</h3>
                 </div>
                 <span className="text-xs text-muted">Sem usar dados posteriores a cada partida</span>
@@ -538,6 +550,25 @@ export default function Admin() {
               <p className="mt-3 text-xs text-muted">
                 Baseline probabilística: log loss {(run.metrics.baseline_log_loss || 0).toFixed(3)} · Brier {(run.metrics.baseline_brier || 0).toFixed(3)}
               </p>
+              <div className="mt-4 border-t border-line pt-4">
+                <div className="label text-brand">Mercados adicionais</div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  {([
+                    ['goals_over_2_5', 'Mais de 2,5 gols'],
+                    ['corners_over_9_5', 'Mais de 9,5 escanteios'],
+                    ['cards_over_4_5', 'Mais de 4,5 cartões'],
+                  ] as const).map(([key, label]) => {
+                    const market = run.metrics.markets?.[key];
+                    return <div key={key} className="rounded-lg bg-black/15 p-3 text-xs text-muted">
+                      <b className="block text-sm text-white">{label}</b>
+                      <span className={market?.available ? (market.approved ? 'text-brand' : 'text-amber-300') : 'text-muted'}>
+                        {market?.available ? `${market.approved ? 'validado' : 'experimental'} · ${((market.accuracy || 0) * 100).toFixed(1)}% acerto` : 'aguardando amostra suficiente'}
+                      </span>
+                      <span className="mt-1 block">{market?.train_samples || 0} treino · {market?.test_samples || 0} teste</span>
+                    </div>;
+                  })}
+                </div>
+              </div>
             </div>
           );
         })()}
@@ -603,6 +634,20 @@ function Stat({
       <div className="label mt-3">{label}</div>
       <b className="mt-1 block text-3xl">{value}</b>
     </div>
+  );
+}
+
+function MarketProbabilityBadge({ label, value }: { label: string; value?: number | null }) {
+  if (value == null) return null;
+  const tone = value >= 0.60
+    ? 'bg-brand/10 text-brand'
+    : value >= 0.50
+      ? 'bg-amber-300/10 text-amber-300'
+      : 'bg-white/[.05] text-muted';
+  return (
+    <span className={`rounded px-1.5 py-1 ${tone}`} title="Cor baseada somente na probabilidade estimada">
+      {label} {(value * 100).toFixed(0)}%
+    </span>
   );
 }
 

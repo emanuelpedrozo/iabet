@@ -135,7 +135,12 @@ def import_football_data_ml_history(year: int):
 def train_ml_result_baseline():
     async def work():
         async with SessionLocal() as s:
-            return await MlTrainingService(s).train_result_baseline()
+            training = await MlTrainingService(s).train_result_baseline()
+            # Uma nova versão passa a ser a mais recente imediatamente. Materialize
+            # suas previsões no mesmo job para o painel nunca ficar vazio entre o
+            # treinamento e a próxima execução periódica do modo sombra.
+            shadow = await MlShadowService(s).materialize()
+            return {**training, "shadow": shadow}
 
     return _run("train_ml_result_baseline", work)
 
