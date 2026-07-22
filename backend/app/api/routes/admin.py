@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import admin
 from app.core.database import get_session
 from app.models.entities import Invitation, JobLog, Match, PlayerMatchStat, Team, User
-from app.models.ml_entities import MlModelRun
 from app.workers.tasks import (
     import_bzzoiro_ml_history,
     import_football_data_ml_history,
@@ -25,8 +24,7 @@ from app.providers.api_sports import ApiSportsProvider
 from app.providers.cartola import CartolaProvider
 from app.providers.bzzoiro import BzzoiroProvider
 from app.services.sync import DataSyncService
-from app.services.ml_history import MlHistoryService
-from app.services.ml_shadow import MlShadowService
+from app.services.ml_dashboard import ml_dashboard_overview
 
 router = APIRouter(prefix="/admin", tags=["Admin"], dependencies=[Depends(admin)])
 
@@ -245,19 +243,7 @@ async def import_ml_history(
 
 @router.get("/ml/overview")
 async def ml_overview(session: AsyncSession = Depends(get_session)):
-    result = await MlHistoryService(session).overview()
-    runs = list(await session.scalars(
-        select(MlModelRun).order_by(MlModelRun.created_at.desc()).limit(5)
-    ))
-    result["model_runs"] = [{
-        "version": run.version, "algorithm": run.algorithm,
-        "status": run.status,
-        "train_seasons": run.train_seasons, "test_season": run.test_season,
-        "train_samples": run.train_samples, "test_samples": run.test_samples,
-        "metrics": run.metrics, "created_at": run.created_at,
-    } for run in runs]
-    result["shadow"] = await MlShadowService(session).overview()
-    return result
+    return await ml_dashboard_overview(session)
 
 
 @router.post("/ml/import-football-data")

@@ -43,11 +43,9 @@ export function Header() {
           <Link href="/" className={linkClass(jogosActive)}>
             Jogos
           </Link>
-          {isAdmin && (
-            <Link href="/machine-learning" className={linkClass(mlActive)}>
-              Machine Learning
-            </Link>
-          )}
+          <Link href="/machine-learning" className={linkClass(mlActive)}>
+            Machine Learning
+          </Link>
           <Link href="/ajuda" className={linkClass(ajudaActive)}>
             Ajuda
           </Link>
@@ -88,13 +86,11 @@ export function Header() {
                 Jogos
               </Link>
             </li>
-            {isAdmin && (
-              <li>
-                <Link href="/machine-learning" className={linkClass(mlActive)} onClick={close}>
-                  Machine Learning
-                </Link>
-              </li>
-            )}
+            <li>
+              <Link href="/machine-learning" className={linkClass(mlActive)} onClick={close}>
+                Machine Learning
+              </Link>
+            </li>
             <li>
               <Link href="/ajuda" className={linkClass(ajudaActive)} onClick={close}>
                 Ajuda

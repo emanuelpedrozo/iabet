@@ -2,17 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import { BrainCircuit, Database, FlaskConical, Gauge, RefreshCw } from 'lucide-react';
-import { apiFetch, clearToken, getToken } from '@/lib/api';
+import { apiFetch } from '@/lib/api';
 
 export default function MachineLearningPage() {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!getToken()) { location.href = '/login'; return; }
-    apiFetch('/admin/ml/overview').then(async response => {
-      if (response.status === 401) { clearToken(); location.href = '/login'; return; }
-      if (response.status === 403) { setError('Esta área está disponível somente para administradores.'); return; }
+    apiFetch('/ml/overview').then(async response => {
       if (!response.ok) { setError('Não foi possível carregar os dados de Machine Learning.'); return; }
       setData(await response.json());
     }).catch(() => setError('Não foi possível carregar os dados de Machine Learning.'));
