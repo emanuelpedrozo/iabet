@@ -428,9 +428,16 @@ def _player_metrics(raw: dict) -> dict:
         key in raw for key in ("player_id", "total_shots", "shots_on_target", "total_tackle")
     )
     if is_bzzoiro:
-        value = lambda *keys: next(
-            (_number(raw.get(key)) for key in keys if _number(raw.get(key)) is not None), 0.0
-        )
+        def value(*keys: str) -> float:
+            return next(
+                (
+                    number
+                    for key in keys
+                    if (number := _number(raw.get(key))) is not None
+                ),
+                0.0,
+            )
+
         goals_conceded = value("goals_conceded", "goals_conceded_inside_box")
         return {
             "source": "bzzoiro",
