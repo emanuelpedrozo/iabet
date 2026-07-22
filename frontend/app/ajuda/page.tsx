@@ -25,7 +25,7 @@ const groups: { id: string; title: string; description: string; icon: React.Reac
       { term: 'Recomendação', name: 'Value conservador', description: 'Value que também atende aos limites de probabilidade, confiança, odd e coerência com o cenário principal.' },
       { term: 'Especulativa', name: 'Value de maior risco', description: 'Pode ter valor matemático, mas possui probabilidade ou confiança insuficiente para ser a indicação principal.' },
       { term: 'Confiança', name: 'Qualidade da estimativa', description: 'Combina concordância entre modelos, tamanho da amostra, edge, movimento e cobertura das odds.' },
-      { term: 'Placar provável', name: 'Moda do placar', description: 'Placar individual com maior probabilidade. Não precisa coincidir isoladamente com a soma das probabilidades de vitória, empate ou derrota.' },
+      { term: 'Placar exato mais provável', name: 'Moda do placar', description: 'Placar individual com maior probabilidade e sua chance isolada. Não precisa coincidir com o resultado 1X2, que soma vários placares de vitória, empate ou derrota.' },
     ],
   },
   {

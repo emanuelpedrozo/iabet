@@ -430,6 +430,9 @@ class MlShadowService:
         active_backtest = [
             row for row in backtest if row.comparison.get("active_log_loss") is not None
         ]
+        draw_backtest = [
+            row for row in backtest if row.comparison.get("outcome") == "draw"
+        ]
         ordered = sorted(
             rows,
             key=lambda row: float(row.comparison.get("max_probability_delta") or 0),
@@ -504,6 +507,21 @@ class MlShadowService:
                     4,
                 )
                 if active_backtest
+                else None,
+                "draws": len(draw_backtest),
+                "shadow_draw_recall": round(
+                    sum(row.comparison.get("shadow_pick") == "draw" for row in draw_backtest)
+                    / len(draw_backtest),
+                    4,
+                )
+                if draw_backtest
+                else None,
+                "active_draw_recall": round(
+                    sum(row.comparison.get("active_pick") == "draw" for row in draw_backtest)
+                    / len(draw_backtest),
+                    4,
+                )
+                if draw_backtest
                 else None,
                 "shadow_log_loss": round(
                     sum(float(row.comparison["shadow_log_loss"]) for row in backtest)

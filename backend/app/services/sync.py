@@ -46,6 +46,7 @@ ALIASES = {
     "atletico mg": "ca mineiro",
     "atletico paranaense": "ca paranaense",
     "athletico paranaense": "ca paranaense",
+    "athletico": "ca paranaense",
     "athletico pr": "ca paranaense",
     "flamengo": "cr flamengo",
     "corinthians": "corinthians paulista",
@@ -679,14 +680,15 @@ class DataSyncService:
         }
 
     async def sync_bzzoiro_today(self) -> dict:
-        """Vincula jogos de hoje/amanhã e importa escalações v2 sem remover fallbacks."""
+        """Vincula previamente os eventos e intensifica a busca da escalação perto do jogo."""
         provider = BzzoiroProvider()
         if not provider.configured:
             return {"provider": "bzzoiro", "configured": False, "skipped": "missing_api_key"}
         now = datetime.now(timezone.utc)
         local_now = now.astimezone(ZoneInfo("America/Sao_Paulo"))
-        start_local = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
-        end_local = start_local + timedelta(days=2)
+        # Inclui ontem para capturar scouts finais de partidas encerradas à noite.
+        start_local = local_now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+        end_local = start_local + timedelta(days=3)
         start, end = start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
         remote = await provider.events(start.isoformat(), end.isoformat())
         local = list(
@@ -696,43 +698,109 @@ class DataSyncService:
                 .options(selectinload(Match.home_team), selectinload(Match.away_team))
             )
         )
+        # A listagem geral pode cortar jogos por paginação. Para partidas ainda
+        # sem ID, consulta a temporada da Série A e cria um índice determinístico.
+        needs_link = [
+            match for match in local
+            if not ((match.metadata_ or {}).get("external_ids") or {}).get("bzzoiro")
+        ]
+        if needs_link:
+            competition = await self.session.get(Competition, needs_link[0].competition_id)
+            seasons = await provider.league_seasons(9)
+            remote_season = next(
+                (row for row in seasons if int(row.get("year") or 0) == int(competition.season)),
+                None,
+            )
+            if remote_season:
+                offset = 0
+                while True:
+                    page = await provider.season_events(
+                        int(remote_season["id"]), limit=200, offset=offset, status=None
+                    )
+                    rows = page if isinstance(page, list) else page.get("results") or page.get("events") or []
+                    remote.extend(rows)
+                    if len(rows) < 200:
+                        break
+                    offset += len(rows)
         linked, imported, unavailable, errors, odds_inserted = 0, [], [], [], 0
         touched: set[int] = set()
         for match in local:
+            known_id = ((match.metadata_ or {}).get("external_ids") or {}).get("bzzoiro")
             candidate = next(
                 (
                     row for row in remote
-                    if normalize(str(row.get("home_team") or "")) == normalize(match.home_team.name)
+                    if (known_id and str(row.get("id")) == str(known_id))
+                    or (normalize(str(row.get("home_team") or "")) == normalize(match.home_team.name)
                     and normalize(str(row.get("away_team") or "")) == normalize(match.away_team.name)
-                ),
+                    and abs((datetime.fromisoformat(str(row.get("event_date")).replace("Z", "+00:00")) - match.kickoff).total_seconds()) < 86400)
+                    )
+                ,
                 None,
             )
+            if not candidate:
+                if known_id:
+                    try:
+                        candidate = await provider.event(int(known_id))
+                    except Exception:
+                        candidate = None
             if not candidate:
                 unavailable.append({"match_id": match.id, "reason": "event_not_matched"})
                 continue
             event_id = int(candidate["id"])
             linked += 1
             try:
+                existing_bzz = dict((match.metadata_ or {}).get("bzzoiro") or {})
+                last_poll_raw = existing_bzz.get("polled_at")
+                last_poll = datetime.fromisoformat(last_poll_raw) if last_poll_raw else None
+                minutes_to_kickoff = (match.kickoff - now).total_seconds() / 60
+                interval = 15 if minutes_to_kickoff > 90 else 5 if minutes_to_kickoff > 30 else 2
+                already_confirmed = existing_bzz.get("lineup_status") == "confirmed"
+                details_done = bool(existing_bzz.get("details_synced_at"))
+                if match.status == MatchStatus.scheduled and already_confirmed:
+                    unavailable.append({"match_id": match.id, "reason": "lineup_already_confirmed"})
+                    continue
+                if match.status == MatchStatus.finished and details_done:
+                    unavailable.append({"match_id": match.id, "reason": "details_already_synced"})
+                    continue
+                if last_poll and now - last_poll < timedelta(minutes=interval):
+                    unavailable.append({"match_id": match.id, "reason": f"throttled_{interval}m"})
+                    continue
                 lineup = await provider.lineups(event_id)
                 odds_data = await provider.odds_comparison(event_id)
                 meta = dict(match.metadata_ or {})
                 external_ids = dict(meta.get("external_ids") or {})
                 external_ids["bzzoiro"] = str(event_id)
                 meta["external_ids"] = external_ids
+                prior_bzz = dict(meta.get("bzzoiro") or {})
+                official_confirmed_at = prior_bzz.get("official_confirmed_at")
+                if (
+                    lineup.get("lineup_status") == "confirmed"
+                    and not official_confirmed_at
+                    and match.status != MatchStatus.finished
+                ):
+                    official_confirmed_at = now.isoformat()
                 meta["bzzoiro"] = {
-                    **dict(meta.get("bzzoiro") or {}),
+                    **prior_bzz,
                     "lineup_status": lineup.get("lineup_status", "unavailable"),
                     "lineups": lineup.get("lineups"),
                     "unavailable_players": lineup.get("unavailable_players"),
                     "updated_at": lineup.get("updated_at"),
+                    "provider_updated_at": lineup.get("updated_at"),
+                    "official_confirmed_at": official_confirmed_at,
+                    "polled_at": now.isoformat(),
                     "synced_at": now.isoformat(),
                 }
                 match.metadata_ = meta
                 inserted = self._ingest_bzzoiro_odds(match, odds_data)
+                details = None
+                if match.status == MatchStatus.finished:
+                    details = await self._ingest_bzzoiro_finished(match, candidate, lineup, provider)
+                    meta["bzzoiro"]["details_synced_at"] = now.isoformat()
                 odds_inserted += inserted
                 touched.add(match.id)
                 imported.append({"match_id": match.id, "event_id": event_id,
-                                 "status": lineup.get("lineup_status"), "odds": inserted})
+                                 "status": lineup.get("lineup_status"), "odds": inserted,
+                                 "details": details})
             except Exception as exc:
                 errors.append({"match_id": match.id, "event_id": event_id, "error": str(exc)[:180]})
         await self.session.flush()
@@ -741,6 +809,72 @@ class DataSyncService:
         return {"provider": "bzzoiro", "received": len(remote), "local": len(local), "linked": linked,
                 "imported": imported, "odds_inserted": odds_inserted, "odds_pruned": pruned,
                 "unavailable": unavailable, "errors": errors}
+
+    async def _ingest_bzzoiro_finished(self, match, event, lineup, provider) -> dict:
+        event_id = int(event["id"])
+        stats_payload = await provider.event_stats(event_id)
+        player_payload = await provider.player_stats(event_id)
+        created_players = created_stats = 0
+        for side, team in (("home", match.home_team), ("away", match.away_team)):
+            metrics = ((stats_payload.get("stats") or {}).get(side) or {})
+            if not metrics:
+                continue
+            metrics = {**metrics, "source": "bzzoiro"}
+            row = await self.session.scalar(
+                select(TeamStat).where(TeamStat.match_id == match.id, TeamStat.team_id == team.id)
+            )
+            if row:
+                row.metrics = merge_metrics(row.metrics, metrics)
+            else:
+                self.session.add(TeamStat(match_id=match.id, team_id=team.id,
+                                          is_home=side == "home", metrics=metrics))
+
+        identities = {}
+        for side in ("home", "away"):
+            group = ((lineup.get("lineups") or {}).get(side) or {})
+            for started, rows in ((True, group.get("players") or []), (False, group.get("substitutes") or [])):
+                for item in rows:
+                    if item.get("id") is not None:
+                        identities[int(item["id"])] = {**item, "started": started, "side": side}
+        rows = player_payload.get("player_stats") if isinstance(player_payload, dict) else player_payload
+        home_remote_id = int(event.get("home_team_id") or 0)
+        for metrics in rows or []:
+            remote_id = int(metrics["player_id"])
+            identity = identities.get(remote_id) or {}
+            is_home = int(metrics.get("team_id") or 0) == home_remote_id
+            team = match.home_team if is_home else match.away_team
+            player = await self.session.scalar(
+                select(Player).where(Player.team_id == team.id,
+                    Player.stats["bzzoiro_id"].as_string() == str(remote_id))
+            )
+            name = str(identity.get("name") or identity.get("short_name") or f"Jogador {remote_id}")
+            remote_position = str(identity.get("position") or "").upper()
+            position = "GOL" if remote_position in {"G", "GK", "GOL", "GOLEIRO", "GOALKEEPER"} else remote_position
+            if not player:
+                player = await self.session.scalar(
+                    select(Player).where(Player.team_id == team.id, Player.name.ilike(name))
+                )
+            if not player:
+                player = Player(team_id=team.id, name=name,
+                                position=position, status="available",
+                                stats={"bzzoiro_id": str(remote_id)})
+                self.session.add(player); await self.session.flush(); created_players += 1
+            else:
+                player.stats = {**(player.stats or {}), "bzzoiro_id": str(remote_id)}
+                if position:
+                    player.position = position
+            record = await self.session.scalar(select(PlayerMatchStat).where(
+                PlayerMatchStat.player_id == player.id, PlayerMatchStat.match_id == match.id))
+            metrics = {**metrics, "source": "bzzoiro"}
+            values = dict(team_id=team.id, is_home=is_home,
+                          started=bool(identity.get("started")), minutes=metrics.get("minutes_played"),
+                          position=position or None, rating=metrics.get("rating"), metrics=metrics)
+            if record:
+                for key, value in values.items(): setattr(record, key, value)
+            else:
+                self.session.add(PlayerMatchStat(player_id=player.id, match_id=match.id, **values)); created_stats += 1
+        return {"team_stats": bool(stats_payload.get("stats")), "players": len(rows or []),
+                "players_created": created_players, "stats_created": created_stats}
 
     def _ingest_bzzoiro_odds(self, match: Match, payload: dict) -> int:
         """Normaliza somente mercados que o modelo do IABet sabe precificar."""

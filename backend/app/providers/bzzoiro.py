@@ -37,10 +37,13 @@ class BzzoiroProvider:
         rows = data if isinstance(data, list) else data.get("results") or data.get("data") or []
         return {"configured": True, "healthy": True, "brazil_leagues_sample": len(rows)}
 
-    async def events(self, date_from: str, date_to: str) -> list[dict]:
+    async def events(self, date_from: str, date_to: str, status: str | None = None) -> list[dict]:
+        params = {"date_from": date_from, "date_to": date_to, "limit": 100}
+        if status:
+            params["status"] = status
         data = await self._get(
             "/api/v2/events/",
-            {"date_from": date_from, "date_to": date_to, "limit": 100, "status": "notstarted"},
+            params,
         )
         return data if isinstance(data, list) else data.get("results") or data.get("data") or []
 
@@ -49,15 +52,21 @@ class BzzoiroProvider:
         return data if isinstance(data, list) else data.get("seasons") or []
 
     async def season_events(
-        self, season_id: int, *, limit: int = 200, offset: int = 0, status: str = "finished"
+        self, season_id: int, *, limit: int = 200, offset: int = 0, status: str | None = "finished"
     ) -> dict:
+        params = {"season_id": season_id, "limit": limit, "offset": offset}
+        if status:
+            params["status"] = status
         return await self._get(
             "/api/v2/events/",
-            {"season_id": season_id, "status": status, "limit": limit, "offset": offset},
+            params,
         )
 
     async def lineups(self, event_id: int) -> dict:
         return await self._get(f"/api/v2/events/{event_id}/lineups/")
+
+    async def event(self, event_id: int) -> dict:
+        return await self._get(f"/api/v2/events/{event_id}/")
 
     async def event_stats(self, event_id: int) -> dict:
         return await self._get(f"/api/v2/events/{event_id}/stats/")

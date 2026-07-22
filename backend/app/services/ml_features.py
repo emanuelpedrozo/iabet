@@ -174,6 +174,34 @@ def _softmax(logits: np.ndarray, temperature: float = 1.0) -> np.ndarray:
     return exp / exp.sum(axis=1, keepdims=True)
 
 
+def apply_class_bias(
+    probabilities: np.ndarray, classes: list, class_bias: dict[str, float] | None
+) -> np.ndarray:
+    """Aplica calibração por classe e renormaliza as probabilidades."""
+    adjusted = np.asarray(probabilities, dtype=float).copy()
+    bias = class_bias or {}
+    for index, label in enumerate(classes):
+        adjusted[:, index] *= max(float(bias.get(str(label), 1.0)), 1e-6)
+    totals = adjusted.sum(axis=1, keepdims=True)
+    return adjusted / np.where(totals == 0, 1.0, totals)
+
+
+def fit_draw_bias(
+    pipeline, x_cal: np.ndarray, y_cal: list, classes: list, temperature: float
+) -> dict[str, float]:
+    """Calibra empate usando somente a fatia cronológica de validação."""
+    if "draw" not in classes or len(x_cal) < 30 or "draw" not in y_cal:
+        return {}
+    base = _softmax(_logits(pipeline, np.asarray(x_cal, dtype=float)), temperature)
+    best_factor, best_loss = 1.0, float(log_loss(y_cal, base, labels=classes))
+    for factor in (0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.35, 1.5, 1.7):
+        candidate = apply_class_bias(base, classes, {"draw": factor})
+        loss = float(log_loss(y_cal, candidate, labels=classes))
+        if loss < best_loss:
+            best_factor, best_loss = factor, loss
+    return {"draw": best_factor}
+
+
 def fit_temperature(pipeline, x_cal: np.ndarray, y_cal: list, classes: list) -> float:
     """Temperatura que minimiza log loss na fatia de calibração (só treino)."""
     if len(x_cal) < 20 or len(set(y_cal)) < 2:
@@ -194,7 +222,13 @@ def fit_temperature(pipeline, x_cal: np.ndarray, y_cal: list, classes: list) -> 
     return best_t
 
 
-def serialize_pipeline(pipeline, *, temperature: float = 1.0, extra: dict | None = None) -> dict:
+def serialize_pipeline(
+    pipeline,
+    *,
+    temperature: float = 1.0,
+    class_bias: dict[str, float] | None = None,
+    extra: dict | None = None,
+) -> dict:
     scaler, clf = pipeline[0], pipeline[1]
     payload = {
         "classes": clf.classes_.tolist(),
@@ -203,6 +237,7 @@ def serialize_pipeline(pipeline, *, temperature: float = 1.0, extra: dict | None
         "coefficients": clf.coef_.tolist(),
         "intercept": clf.intercept_.tolist(),
         "temperature": float(temperature),
+        "class_bias": class_bias or {},
         "feature_names": FEATURES,
         "form_window": FORM_WINDOW,
     }
@@ -237,6 +272,9 @@ def predict_proba_from_artifact(values: list[float], artifact: dict) -> dict[str
     logits = logits - logits.max()
     exp = np.exp(logits)
     vector = exp / exp.sum()
+    vector = apply_class_bias(
+        vector.reshape(1, -1), classes, artifact.get("class_bias")
+    )[0]
     return {label: round(float(vector[i]), 4) for i, label in enumerate(classes)}
 
 

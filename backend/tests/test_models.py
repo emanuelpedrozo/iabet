@@ -8,12 +8,13 @@ from app.services.models import (
     poisson_model,
 )
 from app.services.value import market_probability
-from app.api.routes.matches import h2h_over25_rate, values_for
+from app.api.routes.matches import build_post_match_audit, h2h_over25_rate, values_for
 
 
 def test_poisson_1x2_sums_to_one_after_renormalize():
     p = poisson_model(ModelInput(1.1, 0.9, 0.95, 1.05, 1600, 1500))
     assert abs(p["home"] + p["draw"] + p["away"] - 1) < 1e-9
+    assert 0 < p["score_probability"] < 1
 
 
 def test_dixon_coles_increases_00_when_rho_negative():
@@ -27,7 +28,34 @@ def test_ensemble_14_exposes_extra_totals_lines():
     p = ensemble(ModelInput(1.1, 0.9, 0.95, 1.05, 1600, 1500))
     assert p["version"] == "ensemble-1.4"
     assert "over_1_5" in p and "over_3_5" in p
+    assert 0 < p["score_probability"] < 1
     assert abs(p["home"] + p["draw"] + p["away"] - 1) < 0.01
+
+
+def test_post_match_audit_compares_saved_prediction_with_real_match():
+    audit = build_post_match_audit(
+        {
+            "home": 0.39,
+            "draw": 0.23,
+            "away": 0.38,
+            "score": "1-1",
+            "score_probability": 0.12,
+            "over_2_5": 0.41,
+            "btts_yes": 0.52,
+            "corners_over_9_5": 0.55,
+        },
+        home_name="Atlético-MG",
+        away_name="Bahia",
+        home_score=1,
+        away_score=1,
+        actual_stats={"corners": 11, "cards": None, "shots": None},
+    )
+    rows = {row["key"]: row for row in audit["rows"]}
+    assert rows["result"]["hit"] is False
+    assert rows["score"]["hit"] is True
+    assert rows["goals"]["hit"] is True
+    assert rows["btts"]["hit"] is True
+    assert rows["corners"]["hit"] is True
 
 
 def test_market_probability_line_15():

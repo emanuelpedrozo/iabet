@@ -2,6 +2,7 @@ from app.services.ml_features import (
     FEATURES,
     FORM_WINDOW,
     RollingState,
+    apply_class_bias,
     canonical_club_name,
     predict_binary_from_artifact,
     predict_proba_from_artifact,
@@ -48,3 +49,12 @@ def test_predict_binary_from_artifact_in_unit_interval():
     artifact = serialize_pipeline(pipeline, temperature=1.0, extra={"label": "t", "line": 2.5})
     p = predict_binary_from_artifact(list(x[0]), artifact)
     assert 0.0 <= p <= 1.0
+
+
+def test_draw_bias_increases_draw_probability_and_keeps_sum_one():
+    probabilities = np.asarray([[0.40, 0.25, 0.35]])
+    adjusted = apply_class_bias(
+        probabilities, ["home", "draw", "away"], {"draw": 1.5}
+    )
+    assert adjusted[0, 1] > probabilities[0, 1]
+    assert abs(float(adjusted.sum()) - 1.0) < 1e-9

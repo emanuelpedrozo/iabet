@@ -95,8 +95,8 @@ export function MatchCard({ m, index, positions = {} }: { m: Match; index: numbe
                 {m.best_value.strength}
               </span>
             </div>
-            <div className="mt-1 flex items-end justify-between gap-3">
-              <b className="truncate">
+            <div className="mt-1 flex min-h-[40px] items-end justify-between gap-3">
+              <b className="min-w-0 flex-1 line-clamp-2 leading-5" title={bestValueLabel(m.best_value)}>
                 {bestValueLabel(m.best_value)}
               </b>
               <b className="shrink-0 text-xl text-brand">{m.best_value.odd.toFixed(2)}</b>
@@ -141,8 +141,8 @@ function ModelPick({ m }: { m: Match }) {
         <span>Resultado mais provável</span>
         <b className="text-white">{pct(pick.estimated_probability)}</b>
       </div>
-      <div className="mt-1 flex items-end justify-between gap-3">
-        <b className="truncate">{label}</b>
+      <div className="mt-1 flex min-h-[40px] items-end justify-between gap-3">
+        <b className="min-w-0 flex-1 line-clamp-2 leading-5" title={label}>{label}</b>
         {pick.odd != null && <b className="shrink-0 text-lg">{pick.odd.toFixed(2)}</b>}
       </div>
       <div className="mt-1 text-[11px] text-muted">

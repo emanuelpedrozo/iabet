@@ -13,8 +13,8 @@ export function Header() {
   const [open, setOpen] = useState(false);
 
   const jogosActive = pathname === '/';
-  const rodadaActive = pathname.startsWith('/rodada');
   const adminActive = pathname.startsWith('/admin');
+  const mlActive = pathname.startsWith('/machine-learning');
   const ajudaActive = pathname.startsWith('/ajuda');
 
   function close() {
@@ -43,12 +43,11 @@ export function Header() {
           <Link href="/" className={linkClass(jogosActive)}>
             Jogos
           </Link>
-          <Link href="/rodada" className={linkClass(rodadaActive)}>
-            Próxima rodada
-          </Link>
-          <Link href="/#value" className={linkClass(false)}>
-            Value bets
-          </Link>
+          {isAdmin && (
+            <Link href="/machine-learning" className={linkClass(mlActive)}>
+              Machine Learning
+            </Link>
+          )}
           <Link href="/ajuda" className={linkClass(ajudaActive)}>
             Ajuda
           </Link>
@@ -89,16 +88,13 @@ export function Header() {
                 Jogos
               </Link>
             </li>
-            <li>
-              <Link href="/rodada" className={linkClass(rodadaActive)} onClick={close}>
-                Próxima rodada
-              </Link>
-            </li>
-            <li>
-              <Link href="/#value" className={linkClass(false)} onClick={close}>
-                Value bets
-              </Link>
-            </li>
+            {isAdmin && (
+              <li>
+                <Link href="/machine-learning" className={linkClass(mlActive)} onClick={close}>
+                  Machine Learning
+                </Link>
+              </li>
+            )}
             <li>
               <Link href="/ajuda" className={linkClass(ajudaActive)} onClick={close}>
                 Ajuda

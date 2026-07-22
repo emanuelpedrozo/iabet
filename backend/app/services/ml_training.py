@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 import numpy as np
-from sklearn.metrics import accuracy_score, log_loss
+from sklearn.metrics import accuracy_score, log_loss, precision_recall_fscore_support
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +13,9 @@ from app.services.ml_features import (
     FEATURES,
     FORM_WINDOW,
     RollingState,
+    apply_class_bias,
     canonical_club_name,
+    fit_draw_bias,
     fit_temperature,
     make_classifier,
     serialize_pipeline,
@@ -249,15 +251,30 @@ class MlTrainingService:
         pipeline.fit(fit_x, fit_y)
         classes = pipeline[-1].classes_.tolist()
         temperature = fit_temperature(pipeline, cal_x, list(cal_y), classes)
+        class_bias = fit_draw_bias(pipeline, cal_x, list(cal_y), classes, temperature)
         pipeline.fit(x_train_arr, y_train)
 
         from app.services.ml_features import _logits, _softmax
 
-        probabilities = _softmax(
-            _logits(pipeline, np.asarray(x_test, dtype=float)), temperature
+        probabilities = apply_class_bias(
+            _softmax(_logits(pipeline, np.asarray(x_test, dtype=float)), temperature),
+            classes,
+            class_bias,
         )
         predictions = [classes[int(i)] for i in np.argmax(probabilities, axis=1)]
         accuracy = float(accuracy_score(y_test, predictions))
+        precision, recall, f1, support = precision_recall_fscore_support(
+            y_test, predictions, labels=classes, zero_division=0
+        )
+        class_metrics = {
+            label: {
+                "precision": round(float(precision[index]), 4),
+                "recall": round(float(recall[index]), 4),
+                "f1": round(float(f1[index]), 4),
+                "support": int(support[index]),
+            }
+            for index, label in enumerate(classes)
+        }
         loss = float(log_loss(y_test, probabilities, labels=classes))
         brier = float(
             np.mean(
@@ -340,12 +357,16 @@ class MlTrainingService:
                 "baseline_log_loss": round(baseline_loss, 4),
                 "baseline_brier": round(baseline_brier, 4),
                 "temperature": round(temperature, 3),
+                "class_bias": class_bias,
+                "class_metrics": class_metrics,
                 "form_window": FORM_WINDOW,
                 "approved": approved,
                 "markets": market_metrics,
             },
             artifact={
-                **serialize_pipeline(pipeline, temperature=temperature),
+                **serialize_pipeline(
+                    pipeline, temperature=temperature, class_bias=class_bias
+                ),
                 "market_models": market_artifacts,
             },
         )

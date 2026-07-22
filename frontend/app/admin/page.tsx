@@ -21,7 +21,7 @@ const adminTabs: { id: AdminTab; label: string; description: string; icon: React
   { id: 'overview', label: 'Visão geral', description: 'Resumo do ambiente e dos dados cadastrados.', icon: <LayoutDashboard size={17} aria-hidden /> },
   { id: 'access', label: 'Acessos', description: 'Aprove usuários, bloqueie contas e gere convites.', icon: <ShieldCheck size={17} aria-hidden /> },
   { id: 'data', label: 'Dados', description: 'Execute sincronizações e atualize as fontes esportivas.', icon: <Database size={17} aria-hidden /> },
-  { id: 'ml', label: 'Machine Learning', description: 'Importe históricos, treine e acompanhe o modelo sombra.', icon: <BrainCircuit size={17} aria-hidden /> },
+  { id: 'ml', label: 'Operações ML', description: 'Importe históricos, treine e atualize o modelo. A análise está na aba Machine Learning.', icon: <BrainCircuit size={17} aria-hidden /> },
   { id: 'monitor', label: 'Monitoramento', description: 'Confira a saúde dos providers e as últimas execuções.', icon: <Activity size={17} aria-hidden /> },
 ];
 type MlQuality = {
@@ -72,13 +72,16 @@ type MlOverview = {
         max_probability_delta: number;
       };
     }[];
-    backtest?: {
+    backtest: {
       window_days?: number;
       games: number;
       shadow_accuracy: number | null;
       active_accuracy: number | null;
       shadow_log_loss: number | null;
       active_log_loss: number | null;
+      draws?: number;
+      shadow_draw_recall?: number | null;
+      active_draw_recall?: number | null;
       matches: {
         match_id: number;
         home_team: string;
@@ -93,6 +96,7 @@ type MlOverview = {
           shadow_pick: 'home' | 'draw' | 'away';
           active_correct: boolean;
           shadow_correct: boolean;
+          active_probabilities?: Record<string, number | null>;
         };
       }[];
     };
@@ -106,7 +110,7 @@ export default function Admin() {
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [inviteLink, setInviteLink] = useState('');
-  const [mlOverview, setMlOverview] = useState<MlOverview | null>(null);
+  const [mlOverview, setMlOverview] = useState<MlOverview>({} as MlOverview);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -379,7 +383,7 @@ export default function Admin() {
         </div>}
       </section>}
 
-      {activeTab === 'ml' && <section className="mt-6 card p-6">
+      {mlOverview && false && activeTab === 'ml' && <section className="mt-6 card p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="label text-brand">Base histórica de ML</div>
@@ -391,7 +395,7 @@ export default function Admin() {
         </div>
         <div className="mt-5 rounded-xl border border-brand/30 bg-brand/[.04] p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <b>Modo sombra · {mlOverview?.shadow?.round ? `rodada ${mlOverview.shadow.round}` : 'próxima rodada'}</b>
+            <b>Modo sombra · {mlOverview?.shadow?.round ? `rodada ${mlOverview?.shadow?.round}` : 'próxima rodada'}</b>
             <span className={mlOverview?.shadow?.active ? 'text-brand' : 'text-amber-300'}>
               {mlOverview?.shadow?.active
                 ? 'modelo approved · forma 10 · calibração · sem afetar recomendações'
@@ -401,7 +405,7 @@ export default function Admin() {
           <p className="mt-2 text-sm text-muted">
             {mlOverview?.shadow?.predictions ?? 0} jogos da rodada comparados
             {mlOverview?.shadow?.agreement_rate != null
-              ? ` · concordância com o modelo atual: ${(mlOverview.shadow.agreement_rate * 100).toFixed(1)}%`
+              ? ` · concordância com o modelo atual: ${(Number(mlOverview.shadow.agreement_rate) * 100).toFixed(1)}%`
               : ' · aguardando comparações'}
           </p>
           <p className="mt-1 text-xs text-muted">
@@ -476,11 +480,16 @@ export default function Admin() {
                 </div>
                 <span className="text-xs text-muted">Sem usar dados posteriores a cada partida</span>
               </div>
-              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
                 <span className="rounded-lg bg-black/15 p-3 text-sm text-muted"><b className="block text-xl text-white">{mlOverview.shadow.backtest.games}</b>jogos</span>
                 <span className="rounded-lg bg-black/15 p-3 text-sm text-muted"><b className="block text-xl text-white">{((mlOverview.shadow.backtest.active_accuracy || 0) * 100).toFixed(1)}%</b>acerto atual</span>
                 <span className="rounded-lg bg-black/15 p-3 text-sm text-muted"><b className="block text-xl text-white">{((mlOverview.shadow.backtest.shadow_accuracy || 0) * 100).toFixed(1)}%</b>acerto ML</span>
                 <span className="rounded-lg bg-black/15 p-3 text-sm text-muted"><b className="block text-xl text-white">{(mlOverview.shadow.backtest.shadow_log_loss || 0).toFixed(3)}</b>log loss ML</span>
+                <span className="rounded-lg bg-black/15 p-3 text-sm text-muted"><b className="block text-xl text-white">{mlOverview.shadow.backtest.draws || 0}</b>empates reais</span>
+                <span className="rounded-lg bg-black/15 p-3 text-sm text-muted">
+                  <b className="block text-base text-white">Atual {((mlOverview.shadow.backtest.active_draw_recall || 0) * 100).toFixed(0)}% · ML {((mlOverview.shadow.backtest.shadow_draw_recall || 0) * 100).toFixed(0)}%</b>
+                  empates detectados
+                </span>
               </div>
               <div className="mt-4 overflow-x-auto rounded-xl border border-line">
                 <table className="w-full min-w-[720px] text-left text-sm">
@@ -492,10 +501,16 @@ export default function Admin() {
                       const labels = { home: row.home_team, draw: 'Empate', away: row.away_team };
                       return (
                         <tr key={row.match_id} className="border-t border-line/70">
-                          <td className="px-3 py-3"><b className="block text-white">{row.home_team} × {row.away_team}</b><span className="text-xs text-muted">{new Date(row.kickoff).toLocaleString('pt-BR')}</span></td>
+                          <td className="px-3 py-3"><a href={`/jogos/${row.match_id}`} className="block font-bold text-white hover:text-brand">{row.home_team} × {row.away_team}</a><span className="text-xs text-muted">{new Date(row.kickoff).toLocaleString('pt-BR')} · clique para conferir</span></td>
                           <td className="px-3 py-3"><b className="text-white">{row.home_score}–{row.away_score}</b><span className="ml-2 text-xs text-muted">{labels[row.comparison.outcome]}</span></td>
-                          <td className={row.comparison.active_correct ? 'px-3 py-3 text-brand' : 'px-3 py-3 text-red-400'}>{labels[row.comparison.active_pick]} · {row.comparison.active_correct ? 'acertou' : 'errou'}</td>
-                          <td className={row.comparison.shadow_correct ? 'px-3 py-3 text-brand' : 'px-3 py-3 text-red-400'}>{labels[row.comparison.shadow_pick]} · {row.comparison.shadow_correct ? 'acertou' : 'errou'}</td>
+                          <td className={row.comparison.active_correct ? 'px-3 py-3 text-brand' : 'px-3 py-3 text-red-400'}>
+                            {labels[row.comparison.active_pick]} · {row.comparison.active_correct ? 'acertou' : 'errou'}
+                            <ProbabilityTriplet probabilities={row.comparison.active_probabilities} />
+                          </td>
+                          <td className={row.comparison.shadow_correct ? 'px-3 py-3 text-brand' : 'px-3 py-3 text-red-400'}>
+                            {labels[row.comparison.shadow_pick]} · {row.comparison.shadow_correct ? 'acertou' : 'errou'}
+                            <ProbabilityTriplet probabilities={row.probabilities} />
+                          </td>
                         </tr>
                       );
                     })}
@@ -647,6 +662,16 @@ function MarketProbabilityBadge({ label, value }: { label: string; value?: numbe
   return (
     <span className={`rounded px-1.5 py-1 ${tone}`} title="Cor baseada somente na probabilidade estimada">
       {label} {(value * 100).toFixed(0)}%
+    </span>
+  );
+}
+
+function ProbabilityTriplet({ probabilities }: { probabilities?: Record<string, number | null> }) {
+  if (!probabilities) return null;
+  const pct = (value: number | null | undefined) => value == null ? '—' : `${(value * 100).toFixed(0)}%`;
+  return (
+    <span className="mt-1 block whitespace-nowrap text-[11px] font-normal text-muted">
+      C {pct(probabilities.home)} · E {pct(probabilities.draw)} · F {pct(probabilities.away)}
     </span>
   );
 }

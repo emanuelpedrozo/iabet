@@ -75,6 +75,7 @@ def poisson_model(x: ModelInput) -> dict:
     over35, under35 = _over_under(m, 3.5)
     btts = float(sum(m[i, j] for i in range(1, m.shape[0]) for j in range(1, m.shape[1])))
     score = np.unravel_index(np.argmax(m), m.shape)
+    score_probability = float(m[score])
     return {
         "home": home,
         "draw": draw,
@@ -90,6 +91,7 @@ def poisson_model(x: ModelInput) -> dict:
         "xg_home": h,
         "xg_away": a,
         "score": f"{score[0]}-{score[1]}",
+        "score_probability": score_probability,
         "dixon_coles_rho": x.dixon_coles_rho,
     }
 
@@ -142,6 +144,7 @@ def ensemble(x: ModelInput) -> dict:
             "xg_home": round(p["xg_home"], 2),
             "xg_away": round(p["xg_away"], 2),
             "score": p["score"],
+            "score_probability": round(p["score_probability"], 4),
             "models": {"poisson": p, "elo": e},
             "version": "ensemble-1.4",
         }

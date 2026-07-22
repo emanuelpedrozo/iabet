@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 
-export function LineupTeam({ team, lineup, unavailable, status, updatedAt, align = 'left' }: {
-  team: any; lineup?: any; unavailable?: any[]; status?: string; updatedAt?: string;
+export function LineupTeam({ team, lineup, unavailable, status, updatedAt, officialConfirmedAt, align = 'left' }: {
+  team: any; lineup?: any; unavailable?: any[]; status?: string; updatedAt?: string; officialConfirmedAt?: string;
   align?: 'left' | 'right';
 }) {
   const [open, setOpen] = useState(false);
@@ -54,7 +54,10 @@ export function LineupTeam({ team, lineup, unavailable, status, updatedAt, align
         {substitutes.length > 0 && <div className="mt-4"><div className="label">{status === 'predicted' ? 'Principais alternativas' : 'Reservas'}</div><div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">{substitutes.map((player: any) => <PlayerLine key={`${player.id}-${player.name}`} player={player} />)}</div></div>}</>
         : <p className="py-5 text-center text-sm text-muted">O IABet continuará consultando a fonte automaticamente antes do jogo.</p>}
       {missing.length > 0 && <div className="mt-4 border-t border-line pt-3"><div className="label text-amber-200">Desfalques e dúvidas</div><div className="mt-2 space-y-1">{missing.map((player: any) => <div key={`${player.id}-${player.name}`} className="text-xs"><b>{player.short_name || player.name}</b><span className="text-muted"> · {player.reason || player.status}</span></div>)}</div></div>}
-      {updatedAt && <div className="mt-3 border-t border-line pt-2 text-[10px] text-muted">Atualizado em {new Date(updatedAt).toLocaleString('pt-BR')} · fonte Bzzoiro</div>}
+      {(updatedAt || officialConfirmedAt) && <div className="mt-3 space-y-1 border-t border-line pt-2 text-[10px] text-muted">
+        {status === 'confirmed' && officialConfirmedAt && <div className="font-semibold text-brand">Oficial confirmada no IABet em {new Date(officialConfirmedAt).toLocaleString('pt-BR')}</div>}
+        {updatedAt && <div>Fonte atualizada em {new Date(updatedAt).toLocaleString('pt-BR')} · Bzzoiro</div>}
+      </div>}
     </div>}
   </div>;
 }
