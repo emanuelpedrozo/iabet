@@ -359,6 +359,11 @@ export default function Admin() {
             onClick={() => runAction('/admin/sync/bzzoiro-today', 'Bzzoiro e escalações')}
             label="Importar Bzzoiro"
           />
+          <Action
+            disabled={actionBusy}
+            onClick={() => runAction('/admin/sync/bzzoiro-recent-players', 'Scouts Bzzoiro dos jogadores')}
+            label="Atualizar scouts dos jogadores"
+          />
         </div>}
         {activeTab === 'ml' && <div className="mt-4 flex flex-wrap items-end gap-3 rounded-2xl border border-line bg-white/[.02] p-4">
           <label className="text-xs text-muted">Temporada Série A

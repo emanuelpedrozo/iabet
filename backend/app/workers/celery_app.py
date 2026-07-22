@@ -10,5 +10,6 @@ celery_app.conf.update(timezone="America/Sao_Paulo",task_track_started=True,beat
  "odds-frequent":{"task":"app.workers.tasks.refresh_odds","schedule":crontab(minute="*/15")},
  # Executa a cada 2 min; o serviço aplica 15/5/2 min conforme a proximidade do jogo.
  "bzzoiro-lineups":{"task":"app.workers.tasks.sync_bzzoiro_today","schedule":crontab(minute="*/2")},
+ "bzzoiro-recent-players":{"task":"app.workers.tasks.sync_bzzoiro_recent_players","schedule":crontab(hour=3,minute=30)},
  "ml-shadow":{"task":"app.workers.tasks.materialize_ml_shadow","schedule":crontab(minute="*/30")},
 })

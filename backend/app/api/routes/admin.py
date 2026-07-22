@@ -15,6 +15,7 @@ from app.workers.tasks import (
     import_football_data_ml_history,
     materialize_ml_shadow,
     refresh_all,
+    sync_bzzoiro_recent_players,
     train_ml_result_baseline,
 )
 from app.providers.api_futebol import ApiFutebolProvider
@@ -209,6 +210,18 @@ async def sync_bzzoiro_today(session: AsyncSession = Depends(get_session)):
         return await DataSyncService(session).sync_bzzoiro_today()
     except (ValueError, RuntimeError) as exc:
         raise _map_sync_error(exc) from exc
+
+
+@router.post("/sync/bzzoiro-recent-players")
+async def sync_recent_player_stats(session: AsyncSession = Depends(get_session)):
+    task = sync_bzzoiro_recent_players.delay(10)
+    session.add(JobLog(
+        job="sync_bzzoiro_recent_players",
+        status="queued",
+        detail={"task_id": task.id, "games_per_team": 10},
+    ))
+    await session.commit()
+    return {"task_id": task.id, "status": "queued", "games_per_team": 10}
 
 
 @router.post("/ml/import-bzzoiro")

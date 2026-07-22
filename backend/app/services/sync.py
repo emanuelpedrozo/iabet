@@ -3,7 +3,7 @@ import unicodedata
 import httpx
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.models.entities import Competition, Match, MatchStatus, Odd, Player, PlayerMatchStat, Prediction, Team, TeamStat
@@ -810,10 +810,172 @@ class DataSyncService:
                 "imported": imported, "odds_inserted": odds_inserted, "odds_pruned": pruned,
                 "unavailable": unavailable, "errors": errors}
 
-    async def _ingest_bzzoiro_finished(self, match, event, lineup, provider) -> dict:
+    async def sync_bzzoiro_recent_players(self, games_per_team: int = 10) -> dict:
+        """Importa scouts operacionais dos jogos recentes da Série A atual.
+
+        A união dos últimos jogos de cada clube evita favorecer equipes com calendário
+        adiantado. Partidas já preenchidas pelo Bzzoiro são ignoradas, tornando o job
+        seguro para execução diária e para reprocessamento manual.
+        """
+        provider = BzzoiroProvider()
+        if not provider.configured:
+            return {"provider": "bzzoiro", "configured": False, "skipped": "missing_api_key"}
+
+        games_per_team = min(max(int(games_per_team), 1), 10)
+        local_year = datetime.now(ZoneInfo("America/Sao_Paulo")).year
+        competition = await self.session.scalar(
+            select(Competition)
+            .where(
+                Competition.season == str(local_year),
+                or_(
+                    Competition.name.ilike("%série a%"),
+                    Competition.name.ilike("%serie a%"),
+                ),
+            )
+            .order_by(Competition.active.desc(), Competition.id.desc())
+        )
+        if not competition:
+            raise ValueError(f"Brasileirão Série A {local_year} não encontrado")
+
+        finished = list(
+            await self.session.scalars(
+                select(Match)
+                .where(
+                    Match.competition_id == competition.id,
+                    Match.status == MatchStatus.finished,
+                )
+                .options(selectinload(Match.home_team), selectinload(Match.away_team))
+                .order_by(Match.kickoff.desc())
+            )
+        )
+        selected_ids: set[int] = set()
+        team_counts: dict[int, int] = {}
+        for match in finished:
+            teams = (match.home_team_id, match.away_team_id)
+            if any(team_counts.get(team_id, 0) < games_per_team for team_id in teams):
+                selected_ids.add(match.id)
+            for team_id in teams:
+                if team_counts.get(team_id, 0) < games_per_team:
+                    team_counts[team_id] = team_counts.get(team_id, 0) + 1
+            if team_counts and all(count >= games_per_team for count in team_counts.values()):
+                # Só encerra quando todos os clubes encontrados na competição já têm a amostra.
+                known_teams = {m.home_team_id for m in finished} | {m.away_team_id for m in finished}
+                if known_teams.issubset(team_counts):
+                    break
+        matches = [match for match in finished if match.id in selected_ids]
+
+        seasons = await provider.league_seasons(9)
+        remote_season = next(
+            (row for row in seasons if int(row.get("year") or 0) == local_year),
+            None,
+        )
+        if not remote_season:
+            raise ValueError(f"Temporada {local_year} não encontrada no Bzzoiro")
+
+        remote: list[dict] = []
+        offset = 0
+        while True:
+            page = await provider.season_events(
+                int(remote_season["id"]), limit=200, offset=offset, status="finished"
+            )
+            rows = page if isinstance(page, list) else page.get("results") or page.get("events") or []
+            remote.extend(rows)
+            if len(rows) < 200:
+                break
+            offset += len(rows)
+
+        remote_by_id = {str(row.get("id")): row for row in remote if row.get("id") is not None}
+        imported: list[dict] = []
+        skipped: list[dict] = []
+        errors: list[dict] = []
+        for match in matches:
+            existing_count = await self.session.scalar(
+                select(func.count(PlayerMatchStat.id)).where(
+                    PlayerMatchStat.match_id == match.id,
+                    PlayerMatchStat.metrics["source"].as_string() == "bzzoiro",
+                )
+            )
+            if existing_count:
+                skipped.append({"match_id": match.id, "reason": "already_imported"})
+                continue
+
+            external_id = ((match.metadata_ or {}).get("external_ids") or {}).get("bzzoiro")
+            candidates = [
+                row
+                for row in remote
+                if normalize(str(row.get("home_team") or "")) == normalize(match.home_team.name)
+                and normalize(str(row.get("away_team") or "")) == normalize(match.away_team.name)
+                and abs(
+                    (
+                        datetime.fromisoformat(str(row.get("event_date")).replace("Z", "+00:00"))
+                        - match.kickoff
+                    ).total_seconds()
+                )
+                < 86400
+            ]
+            linked_event = remote_by_id.get(str(external_id)) if external_id else None
+            if linked_event:
+                candidates = [linked_event, *[row for row in candidates if row is not linked_event]]
+            if not candidates:
+                skipped.append({"match_id": match.id, "reason": "event_not_matched"})
+                continue
+
+            event = candidates[0]
+            player_payload = None
+            try:
+                # O provider pode listar o mesmo confronto mais de uma vez. Prefere
+                # a versão que realmente contém scouts individuais.
+                for candidate in candidates:
+                    candidate_payload = await provider.player_stats(int(candidate["id"]))
+                    candidate_rows = (
+                        candidate_payload.get("player_stats")
+                        if isinstance(candidate_payload, dict)
+                        else candidate_payload
+                    )
+                    event = candidate
+                    player_payload = candidate_payload
+                    if candidate_rows:
+                        break
+                event_id = int(event["id"])
+                lineup = await provider.lineups(event_id)
+                details = await self._ingest_bzzoiro_finished(
+                    match, event, lineup, provider, player_payload=player_payload
+                )
+                meta = dict(match.metadata_ or {})
+                external_ids = dict(meta.get("external_ids") or {})
+                external_ids["bzzoiro"] = str(event_id)
+                bzzoiro_meta = dict(meta.get("bzzoiro") or {})
+                bzzoiro_meta["details_synced_at"] = datetime.now(timezone.utc).isoformat()
+                meta["external_ids"] = external_ids
+                meta["bzzoiro"] = bzzoiro_meta
+                match.metadata_ = meta
+                await self.session.commit()
+                imported.append({"match_id": match.id, "event_id": event_id, **details})
+            except Exception as exc:
+                await self.session.rollback()
+                errors.append({
+                    "match_id": match.id,
+                    "event_id": event.get("id"),
+                    "error": str(exc)[:180],
+                })
+
+        return {
+            "provider": "bzzoiro",
+            "season": local_year,
+            "games_per_team": games_per_team,
+            "selected_matches": len(matches),
+            "imported": imported,
+            "skipped": skipped,
+            "errors": errors,
+        }
+
+    async def _ingest_bzzoiro_finished(
+        self, match, event, lineup, provider, *, player_payload=None
+    ) -> dict:
         event_id = int(event["id"])
         stats_payload = await provider.event_stats(event_id)
-        player_payload = await provider.player_stats(event_id)
+        if player_payload is None:
+            player_payload = await provider.player_stats(event_id)
         created_players = created_stats = 0
         for side, team in (("home", match.home_team), ("away", match.away_team)):
             metrics = ((stats_payload.get("stats") or {}).get(side) or {})

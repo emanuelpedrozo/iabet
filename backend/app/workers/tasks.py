@@ -95,6 +95,15 @@ def sync_bzzoiro_today():
     return _run("sync_bzzoiro_today", work)
 
 
+@celery_app.task(name="app.workers.tasks.sync_bzzoiro_recent_players")
+def sync_bzzoiro_recent_players(games_per_team: int = 10):
+    async def work():
+        async with SessionLocal() as s:
+            return await DataSyncService(s).sync_bzzoiro_recent_players(games_per_team)
+
+    return _run("sync_bzzoiro_recent_players", work)
+
+
 @celery_app.task(name="app.workers.tasks.import_cartola_recent")
 def import_cartola_recent():
     async def work():
